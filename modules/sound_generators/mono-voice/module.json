@@ -1,0 +1,135 @@
+{
+  "id": "mono-voice",
+  "name": "Mono Voice",
+  "abbrev": "MONV",
+  "version": "0.1.0",
+  "description": "Monomachine-inspired digital machine voice: SuperWave, SID, DigiPRO and FM",
+  "dsp": "dsp.so",
+  "ui_chain": "ui_chain.js",
+  "api_version": 2,
+  "component_type": "sound_generator",
+  "capabilities": {
+    "audio_out": true,
+    "midi_in": true,
+    "midi_out": false,
+    "chainable": true,
+    "component_type": "sound_generator",
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "name": "Mono Voice",
+          "params": [
+            {"key":"machine","name":"Machine","type":"enum","options":["SW Saw","SW Pulse","SW Ensemble","SID 6581","DigiPRO","FM+ Static"],"default":0},
+            {"level":"synth","name":"Synthesis"},
+            {"level":"amp","name":"Amplifier"},
+            {"level":"filter","name":"Filter"},
+            {"level":"effect","name":"Effect"},
+            {"level":"lfo1","name":"LFO 1"},
+            {"level":"lfo2","name":"LFO 2"},
+            {"level":"lfo3","name":"LFO 3"}
+          ],
+          "knobs": ["machine"]
+        },
+        "synth": {
+          "name":"Synthesis",
+          "params":[
+            {"key":"syn1","name":"Synth 1","type":"int","min":0,"max":127,"default":76},
+            {"key":"syn2","name":"Synth 2","type":"int","min":0,"max":127,"default":18},
+            {"key":"syn3","name":"Synth 3","type":"int","min":0,"max":127,"default":32},
+            {"key":"syn4","name":"Synth 4","type":"int","min":0,"max":127,"default":0},
+            {"key":"syn5","name":"Synth 5","type":"int","min":0,"max":127,"default":0},
+            {"key":"syn6","name":"Synth 6","type":"int","min":0,"max":127,"default":0},
+            {"key":"syn7","name":"Synth 7","type":"int","min":0,"max":127,"default":0},
+            {"key":"syn8","name":"Tune","type":"int","min":0,"max":127,"default":64}
+          ],
+          "knobs":["syn1","syn2","syn3","syn4","syn5","syn6","syn7","syn8"]
+        },
+        "amp": {
+          "name":"Amplifier",
+          "params":[
+            {"key":"amp1","name":"Attack","type":"int","min":0,"max":127,"default":0},
+            {"key":"amp2","name":"Hold","type":"int","min":0,"max":127,"default":96},
+            {"key":"amp3","name":"Decay","type":"int","min":0,"max":127,"default":48},
+            {"key":"amp4","name":"Release","type":"int","min":0,"max":127,"default":28},
+            {"key":"amp5","name":"Distortion","type":"int","min":0,"max":127,"default":12},
+            {"key":"amp6","name":"Volume","type":"int","min":0,"max":127,"default":110},
+            {"key":"amp7","name":"Pan","type":"int","min":0,"max":127,"default":64},
+            {"key":"amp8","name":"Portamento","type":"int","min":0,"max":127,"default":0}
+          ],
+          "knobs":["amp1","amp2","amp3","amp4","amp5","amp6","amp7","amp8"]
+        },
+        "filter": {
+          "name":"Filter",
+          "params":[
+            {"key":"flt1","name":"Base","type":"int","min":0,"max":127,"default":0},
+            {"key":"flt2","name":"Width","type":"int","min":0,"max":127,"default":127},
+            {"key":"flt3","name":"HP Q","type":"int","min":0,"max":127,"default":0},
+            {"key":"flt4","name":"LP Q","type":"int","min":0,"max":127,"default":0},
+            {"key":"flt5","name":"Env Attack","type":"int","min":0,"max":127,"default":0},
+            {"key":"flt6","name":"Env Decay","type":"int","min":0,"max":127,"default":48},
+            {"key":"flt7","name":"Env Base","type":"int","min":0,"max":127,"default":64},
+            {"key":"flt8","name":"Env Width","type":"int","min":0,"max":127,"default":32}
+          ],
+          "knobs":["flt1","flt2","flt3","flt4","flt5","flt6","flt7","flt8"]
+        },
+        "effect": {
+          "name":"Effect",
+          "params":[
+            {"key":"fx1","name":"EQ Freq","type":"int","min":0,"max":127,"default":64},
+            {"key":"fx2","name":"EQ Gain","type":"int","min":0,"max":127,"default":64},
+            {"key":"fx3","name":"Sample Rate","type":"int","min":0,"max":127,"default":127},
+            {"key":"fx4","name":"Delay Send","type":"int","min":0,"max":127,"default":0},
+            {"key":"fx5","name":"Delay Time","type":"int","min":0,"max":127,"default":48},
+            {"key":"fx6","name":"Feedback","type":"int","min":0,"max":127,"default":32},
+            {"key":"fx7","name":"Delay Base","type":"int","min":0,"max":127,"default":0},
+            {"key":"fx8","name":"Delay Width","type":"int","min":0,"max":127,"default":127}
+          ],
+          "knobs":["fx1","fx2","fx3","fx4","fx5","fx6","fx7","fx8"]
+        },
+        "lfo1": {
+          "name":"LFO 1",
+          "params":[
+            {"key":"lfo1_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo1_5","name":"Speed","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo1_6","name":"Interlace","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_7","name":"Depth","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_8","name":"Phase","type":"int","min":0,"max":127,"default":0}
+          ],
+          "knobs":["lfo1_1","lfo1_2","lfo1_3","lfo1_4","lfo1_5","lfo1_6","lfo1_7","lfo1_8"]
+        },
+        "lfo2": {
+          "name":"LFO 2",
+          "params":[
+            {"key":"lfo2_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo2_5","name":"Speed","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo2_6","name":"Interlace","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_7","name":"Depth","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_8","name":"Phase","type":"int","min":0,"max":127,"default":0}
+          ],
+          "knobs":["lfo2_1","lfo2_2","lfo2_3","lfo2_4","lfo2_5","lfo2_6","lfo2_7","lfo2_8"]
+        },
+        "lfo3": {
+          "name":"LFO 3",
+          "params":[
+            {"key":"lfo3_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo3_5","name":"Speed","type":"int","min":0,"max":127,"default":32},
+            {"key":"lfo3_6","name":"Interlace","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_7","name":"Depth","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_8","name":"Phase","type":"int","min":0,"max":127,"default":0}
+          ],
+          "knobs":["lfo3_1","lfo3_2","lfo3_3","lfo3_4","lfo3_5","lfo3_6","lfo3_7","lfo3_8"]
+        }
+      }
+    }
+  },
+  "author": "timncox"
+}

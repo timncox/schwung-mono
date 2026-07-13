@@ -1,0 +1,46 @@
+{
+  "title": "Mono Voice",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Digital machine",
+        "synth for a normal",
+        "Move track.",
+        "",
+        "Choose SuperWave,",
+        "SID, DigiPRO or",
+        "FM+ Static, then",
+        "play from Move's",
+        "pads or sequencer."
+      ]
+    },
+    {
+      "title": "Editing",
+      "lines": [
+        "Jog or arrows:",
+        "change data page.",
+        "",
+        "Knobs 1-8 edit",
+        "that page.",
+        "",
+        "Hold Shift and",
+        "turn the jog to",
+        "change machine."
+      ]
+    },
+    {
+      "title": "Pages",
+      "lines": [
+        "SYNTH is unique",
+        "to each machine.",
+        "AMP, FILTER and",
+        "EFFECT shape the",
+        "track. LFO 1-3",
+        "modulate pitch,",
+        "filter, volume,",
+        "pan or delay."
+      ]
+    }
+  ]
+}

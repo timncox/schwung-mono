@@ -1,0 +1,68 @@
+{
+  "title": "Mono",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Six-track digital",
+        "machine synth with",
+        "a 64-step lock",
+        "sequencer.",
+        "",
+        "Open from Schwung's",
+        "overtake menu."
+      ]
+    },
+    {
+      "title": "Tracks",
+      "lines": [
+        "Top-row pads 1-6",
+        "select tracks.",
+        "Pad 7 changes the",
+        "track machine.",
+        "Pad 8 starts or",
+        "stops sequencing.",
+        "",
+        "Lower 3 pad rows",
+        "play notes."
+      ]
+    },
+    {
+      "title": "Steps",
+      "lines": [
+        "Step buttons edit",
+        "the current page",
+        "of 16 steps.",
+        "Red = trig.",
+        "Purple = locked.",
+        "White = playing.",
+        "",
+        "Arrows change the",
+        "16-step page."
+      ]
+    },
+    {
+      "title": "Locks",
+      "lines": [
+        "Hold a step and",
+        "turn a knob to",
+        "lock that value",
+        "on the step.",
+        "",
+        "Hold Shift too",
+        "and turn the knob",
+        "to remove its lock."
+      ]
+    },
+    {
+      "title": "Pages",
+      "lines": [
+        "Turn the jog for",
+        "SYNTH, AMP, FILTER,",
+        "EFFECT and LFO",
+        "pages. Each page",
+        "maps to knobs 1-8."
+      ]
+    }
+  ]
+}

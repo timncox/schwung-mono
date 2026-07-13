@@ -1,0 +1,16 @@
+{
+  "id": "mono",
+  "name": "Mono",
+  "abbrev": "MONO",
+  "version": "0.1.0",
+  "description": "Six-track digital machine synth with a 64-step lock sequencer",
+  "dsp": "dsp.so",
+  "ui": "ui.js",
+  "api_version": 2,
+  "component_type": "overtake",
+  "capabilities": {
+    "suspend_keeps_js": true,
+    "button_passthrough": [85]
+  },
+  "author": "timncox"
+}
