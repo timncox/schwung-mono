@@ -60,3 +60,12 @@ Mono contains no Elektron firmware, factory wavetables, factory samples, or
 copied visual assets. The initial synthesis algorithms are original
 implementations guided by publicly documented behavior. Exact response-curve
 calibration against reference hardware is future work.
+
+## Version 0.1 boundary
+
+This first vertical slice proves the module architecture and is ready for a
+hardware smoke test. It does not yet include VO-6, BeatBox, DigiPRO user-wave
+loading, FM+ Parallel/Dynamic, FX machines/neighbor routing, arpeggiators,
+song mode, or persistent overtake patterns. The current factory-independent
+algorithms also need A/B calibration against a reference Monomachine before
+they should be described as sonically faithful.

@@ -142,6 +142,21 @@ static void test_clock_loss_falls_back(void) {
     mono_destroy(m);
 }
 
+static void test_six_tracks_render_together(void) {
+    mono_t *m = mono_create(&host, 6);
+    assert(m);
+    for (int track = 0; track < 6; ++track) {
+        char v[16];
+        snprintf(v, sizeof(v), "%d", track);
+        mono_set_param(m, "track", v);
+        snprintf(v, sizeof(v), "%d", track % MONO_MACHINE_COUNT);
+        mono_set_param(m, "machine", v);
+        mono_note_on(m, track, 42 + track * 4, 100);
+    }
+    assert(render_energy(m, 32) > 100000);
+    mono_destroy(m);
+}
+
 int main(void) {
     test_all_machines_sound_distinct();
     test_note_release();
@@ -149,6 +164,7 @@ int main(void) {
     test_sequencer_and_lock();
     test_internal_clock();
     test_clock_loss_falls_back();
+    test_six_tracks_render_together();
     puts("mono host simulator: all tests passed");
     return 0;
 }
