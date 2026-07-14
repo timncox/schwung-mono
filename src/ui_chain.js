@@ -106,7 +106,7 @@ globalThis.tick = function() {
 globalThis.onMidiMessageInternal = function(data) {
     if ((data[0] & 0xF0) !== 0xB0) return;
     const cc = data[1], val = data[2];
-    if (cc === MoveShift) { shift = val >= 64; needsRedraw = true; return; }
+    if (cc === MoveShift) { shift = val > 0; needsRedraw = true; return; }
     if (cc === MoveMainKnob) {
         const d = decodeDelta(val);
         if (d) shift ? setMachine(machine + d) : setPage(page + d);

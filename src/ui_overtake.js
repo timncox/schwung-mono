@@ -190,7 +190,7 @@ globalThis.tick = function() {
 globalThis.onMidiMessageInternal = function(data) {
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
-        if (d1 === MoveShift) { shift = d2 >= 64; needsRedraw = true; return; }
+        if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
         if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setPage(page + d); return; }
         if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
         if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
