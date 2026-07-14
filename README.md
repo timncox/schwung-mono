@@ -91,6 +91,8 @@ quick click gets a short, audible gate. The status confirms the event was sent,
 while the counter and last measured peak provide device-side diagnostics when
 Schwung refreshes the module state. If the panel is waiting, select a different
 Remote UI Slot tab and return to reconnect Schwung's slot subscription.
+Remote edits use Mono's event command channel so Schwung 0.11.4 does not remount
+the custom editor for every value emitted during a slider drag.
 
 ## Clean-room scope
 

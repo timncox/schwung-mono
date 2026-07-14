@@ -167,7 +167,8 @@ const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationInd
 function send(key, value) {
   if (!PREFIX) return false;
   M[key] = String(value);
-  schwungRemote.setParam(PREFIX + key, String(value));
+  const direct=key==="note_on"||key==="note_off";
+  schwungRemote.setParam(PREFIX+(direct?key:"rui_set"),direct?String(value):`${key}:${value}`);
   return true;
 }
 const noteName = note => `${NOTE_NAMES[note%12]} · MIDI ${note}`;
@@ -220,7 +221,7 @@ window.addEventListener("keydown",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase
 window.addEventListener("keyup",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0)noteOff(KEY_NOTES[i],el("keys").children[i]);});
 window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));});
 el("play").onclick=()=>{send("transport",number("transport")?0:1); render();};
-function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render(); if(schwungRemote.resubscribe)schwungRemote.resubscribe();}
+function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render();}
 el("pageDown").onclick=()=>changeStepPage(-1); el("pageUp").onclick=()=>changeStepPage(1);
 el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
 

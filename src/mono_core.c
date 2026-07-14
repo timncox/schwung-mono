@@ -1136,6 +1136,17 @@ static void set_lock(mono_t *m, const char *val, int clear) {
 
 void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!m || !key || !val) return;
+    if (!strcmp(key, "rui_set")) {
+        const char *separator = strchr(val, ':');
+        size_t key_len = separator ? (size_t)(separator - val) : 0;
+        char routed_key[32];
+        if (!separator || key_len == 0 || key_len >= sizeof(routed_key)) return;
+        memcpy(routed_key, val, key_len);
+        routed_key[key_len] = '\0';
+        if (!strcmp(routed_key, "rui_set")) return;
+        mono_set_param(m, routed_key, separator + 1);
+        return;
+    }
     if (!strcmp(key, "state")) { restore_state(m, val); return; }
     int v = atoi(val);
     if (!strcmp(key, "track")) { m->selected_track = iclamp(v, 0, m->track_count - 1); changed(m); return; }

@@ -2,7 +2,7 @@
   "id": "mono",
   "name": "Mono",
   "abbrev": "MONO",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Six-track digital machine synth with a 64-step lock sequencer",
   "dsp": "dsp.so",
   "ui": "ui.js",

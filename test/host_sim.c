@@ -285,10 +285,11 @@ static void test_production_event_paths(void) {
 static void test_remote_state_contract(void) {
     mono_t *m = mono_create(&host, 6);
     assert(m);
-    mono_set_param(m, "track", "2");
-    mono_set_param(m, "page", "3");
-    mono_set_param(m, "p4", "99");
-    mono_set_param(m, "toggle_step", "0");
+    mono_set_param(m, "rui_set", "track:2");
+    mono_set_param(m, "rui_set", "page:3");
+    mono_set_param(m, "rui_set", "p4:99");
+    mono_set_param(m, "rui_set", "toggle_step:0");
+    mono_set_param(m, "rui_set", "rui_set:track:0");
     mono_set_param(m, "note_on", "60:112");
     assert(render_energy(m, 4) > 1000);
 
