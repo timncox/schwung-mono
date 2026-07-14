@@ -289,6 +289,8 @@ static void test_remote_state_contract(void) {
     mono_set_param(m, "page", "3");
     mono_set_param(m, "p4", "99");
     mono_set_param(m, "toggle_step", "0");
+    mono_set_param(m, "note_on", "60:112");
+    assert(render_energy(m, 4) > 1000);
 
     char state[16384], poll[128];
     get_string(m, "state", state, sizeof(state));
@@ -297,7 +299,9 @@ static void test_remote_state_contract(void) {
     assert(strstr(state, "\"page\":3"));
     assert(strstr(state, "\"p4\":99"));
     assert(strstr(state, "\"steps\":\"1,"));
+    assert(strstr(state, "\"debug\":\"1:"));
     assert(strchr(poll, ':'));
+    mono_set_param(m, "note_off", "60");
     mono_destroy(m);
 }
 

@@ -84,7 +84,13 @@ scripts/deploy.sh
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
 Remote UI opens a full editor for either build, including a browser keyboard
-for quickly checking the note and audio path.
+for quickly checking the note and audio path. Its audition keys play MIDI notes
+48–60 on the selected track; the large labels are notes and the smaller A–K
+labels are optional computer-key shortcuts. Hold a key to sustain it; even a
+quick click gets a short, audible gate. The status confirms the event was sent,
+while the counter and last measured peak provide device-side diagnostics when
+Schwung refreshes the module state. If the panel is waiting, select a different
+Remote UI Slot tab and return to reconnect Schwung's slot subscription.
 
 ## Clean-room scope
 

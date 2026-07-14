@@ -455,6 +455,7 @@ void mono_note_on(mono_t *m, int track, int note, int velocity) {
     memcpy(t->effective, t->base, MONO_PARAMS);
     track_trigger(m, t, iclamp(note, 0, 127), velocity, 15, 0);
     ++m->note_events;
+    changed(m);
 }
 
 void mono_note_off(mono_t *m, int track, int note) {
@@ -463,6 +464,7 @@ void mono_note_off(mono_t *m, int track, int note) {
     if (note < 0 || t->note == note) {
         env_release(&t->amp, t->effective[11], m->sample_rate);
         t->gate_left = 0;
+        changed(m);
     }
 }
 
@@ -1277,6 +1279,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
                      "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
                      "\"alt5\":%d,\"alt6\":%d,\"alt7\":%d,\"alt8\":%d,"
+                     "\"debug\":\"%u:%d:%d\","
                      "\"steps\":\"%s\",\"data\":\"",
                      m->selected_track, m->selected_page, m->step_page,
                      m->pattern_len, m->master * 100.0f, m->bpm_override,
@@ -1289,6 +1292,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[MONO_ALT_BASE + 2], t->base[MONO_ALT_BASE + 3],
                      t->base[MONO_ALT_BASE + 4], t->base[MONO_ALT_BASE + 5],
                      t->base[MONO_ALT_BASE + 6], t->base[MONO_ALT_BASE + 7],
+                     m->note_events, m->render_peak, m->lifetime_peak,
                      step_csv)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];

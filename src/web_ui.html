@@ -61,9 +61,15 @@
   .step.locked { color:#fff; background:#713d88; }
   .step.playing { outline:2px solid #dbf5c4; outline-offset:1px; }
   .keys { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
-  .key { height:48px; color:#181916; background:linear-gradient(#fbfaf4,#c9c8c0); border-color:#686963; }
+  .key { height:54px; color:#181916; background:linear-gradient(#fbfaf4,#c9c8c0); border-color:#686963;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
   .key.black { color:#eee; background:linear-gradient(#454641,#161714); }
   .key.held { background:var(--red); color:#fff; }
+  .note-name { font-size:11px; }
+  .shortcut { font-size:9px; opacity:.7; }
+  .audition-status { min-height:27px; margin-bottom:7px; padding:6px 8px; color:var(--lcd-ink);
+    background:var(--lcd); border:2px solid #080908; font:700 11px/1.2 "Courier New",monospace; }
+  .audition-status.warn { color:#4d0d09; background:#e7b2ad; }
   .master { display:grid; grid-template-columns:auto 1fr 40px; gap:8px; align-items:center; margin-top:9px; }
   .hint { margin-top:8px; color:#b8b9b2; font-size:10px; font-weight:400; }
   #offline { margin-top:12px; padding:14px; color:#322; background:#e7b2ad; border:1px solid #7e1d18; }
@@ -104,8 +110,10 @@
         <div class="steps" id="steps"></div>
         <div class="hint">Click a step to toggle it. Purple steps contain parameter locks.</div>
       </div>
-      <div class="keyboard"><div class="legend">AUDITION / EVENT TEST</div><div class="keys" id="keys"></div>
-        <div class="hint">Computer keys: A W S E D F T G Y H U J K. If EVENTS rises but PEAK stays zero, the DSP route is silent.</div></div>
+      <div class="keyboard"><div class="legend">AUDITION KEYBOARD</div>
+        <div class="audition-status" id="auditionStatus" role="status" aria-live="polite">Hold a note to audition the selected track.</div>
+        <div class="keys" id="keys"></div>
+        <div class="hint">Plays MIDI notes 48–60 on the selected Mono track. Click and hold, or use the small computer-key shortcut shown on each note.</div></div>
     </section>
   </div>
 </main>
@@ -139,12 +147,16 @@ const SYNTH_SHIFT = [
   ["OP2 FINE","OP2 FB","OP3 FREQ","OP3 LEVEL","DRIFT","FOLD","BITS","NOISE"]];
 const KEY_NOTES = [48,49,50,51,52,53,54,55,56,57,58,59,60];
 const KEYBOARD = ["a","w","s","e","d","f","t","g","y","h","u","j","k"];
+const NOTE_NAMES = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
 const BLACK = new Set([1,3,6,8,10]);
 let PREFIX = null;
 let altLayer = false;
+let lastEventCount = -1;
 const M = {};
 const touched = {};
 const held = new Set();
+const noteStarted = new Map();
+const releaseTimers = new Map();
 const el = id => document.getElementById(id);
 const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[key]);
 const labels = () => number("page") === 0 ? (altLayer ? SYNTH_SHIFT[number("machine")] : SYNTH[number("machine")]) : COMMON[number("page")];
@@ -153,17 +165,20 @@ const isLfoDestination = i => number("page") >= 4 && i === 0;
 const destinationIndex = value => Math.max(0,Math.min(6,Math.floor(Number(value)/16)));
 const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)] : String(value).padStart(3,"0");
 function send(key, value) {
-  if (!PREFIX) return;
+  if (!PREFIX) return false;
   M[key] = String(value);
   schwungRemote.setParam(PREFIX + key, String(value));
+  return true;
 }
+const noteName = note => `${NOTE_NAMES[note%12]} · MIDI ${note}`;
+function auditionMessage(text, warn=false) { el("auditionStatus").textContent=text; el("auditionStatus").classList.toggle("warn",warn); }
 function makeButtons(root, names, action) {
   names.forEach((name, i) => { const b=document.createElement("button"); b.textContent=name; b.onclick=()=>action(i); root.appendChild(b); });
 }
 makeButtons(el("tracks"), ["T1","T2","T3","T4","T5","T6"], i=>{send("track",i); render();});
 makeButtons(el("machines"), MACHINES, i=>{send("machine",i); render();});
 makeButtons(el("pages"), PAGES, i=>{if(i!==0)altLayer=false;send("page",i);render();});
-el("layer").onclick=()=>{altLayer=!altLayer;render();if(schwungRemote.resubscribe)schwungRemote.resubscribe();};
+el("layer").onclick=()=>{altLayer=!altLayer;render();};
 for (let i=0;i<8;i++) {
   const box=document.createElement("div"); box.className="control";
   box.innerHTML=`<label id="label${i}">P${i+1}</label><input id="p${i+1}" type="range" min="0" max="127"><output class="value" id="value${i}">000</output>`;
@@ -175,17 +190,35 @@ for (let i=0;i<16;i++) {
   const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
   b.onclick=()=>send("toggle_step",number("step_page")*16+i); el("steps").appendChild(b);
 }
-function noteOn(note, button) { if (held.has(note)) return; held.add(note); button && button.classList.add("held"); send("note_on",`${note}:112`); }
-function noteOff(note, button) { if (!held.has(note)) return; held.delete(note); button && button.classList.remove("held"); send("note_off",note); }
+function noteOn(note, button) {
+  if(releaseTimers.has(note)){clearTimeout(releaseTimers.get(note));releaseTimers.delete(note);}
+  if(held.has(note))return;
+  held.add(note);noteStarted.set(note,Date.now());button&&button.classList.add("held");
+  if(send("note_on",`${note}:112`))auditionMessage(`${noteName(note)} · NOTE ON SENT`);
+  else auditionMessage("NO MONO MODULE CONNECTED",true);
+}
+function finishNoteOff(note, button) {
+  if(!held.has(note))return;
+  held.delete(note);noteStarted.delete(note);releaseTimers.delete(note);
+  button&&button.classList.remove("held");send("note_off",note);
+}
+function noteOff(note, button, immediate=false) {
+  if(!held.has(note)||releaseTimers.has(note))return;
+  const wait=immediate?0:Math.max(0,220-(Date.now()-(noteStarted.get(note)||0)));
+  if(wait>0){releaseTimers.set(note,setTimeout(()=>finishNoteOff(note,button),wait));return;}
+  finishNoteOff(note,button);
+}
 KEY_NOTES.forEach((note,i)=>{
   const b=document.createElement("button"); b.className="key"+(BLACK.has(note%12)?" black":""); b.textContent=KEYBOARD[i].toUpperCase();
+  b.innerHTML=`<span class="note-name">${NOTE_NAMES[note%12]} ${note}</span><span class="shortcut">KEY ${KEYBOARD[i].toUpperCase()}</span>`;
+  b.setAttribute("aria-label",`${NOTE_NAMES[note%12]} MIDI ${note}, keyboard ${KEYBOARD[i].toUpperCase()}`);
   b.onpointerdown=e=>{e.preventDefault(); b.setPointerCapture(e.pointerId); noteOn(note,b);};
   b.onpointerup=b.onpointercancel=e=>noteOff(note,b);
   el("keys").appendChild(b);
 });
-window.addEventListener("keydown",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0&&!e.repeat)noteOn(KEY_NOTES[i],el("keys").children[i]);});
+window.addEventListener("keydown",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0){e.preventDefault();if(!e.repeat)noteOn(KEY_NOTES[i],el("keys").children[i]);}});
 window.addEventListener("keyup",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0)noteOff(KEY_NOTES[i],el("keys").children[i]);});
-window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)]));});
+window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));});
 el("play").onclick=()=>{send("transport",number("transport")?0:1); render();};
 function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render(); if(schwungRemote.resubscribe)schwungRemote.resubscribe();}
 el("pageDown").onclick=()=>changeStepPage(-1); el("pageUp").onclick=()=>changeStepPage(1);
@@ -216,13 +249,15 @@ function render() {
   el("screen").textContent=voice?`${MACHINES[machine]} · VOICE`:`T${track+1} · ${MACHINES[machine]}`;
   el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / ${number("pattern_len",16)} STEPS`;
   el("screenTempo").textContent=`${Number(number("bpm",120)).toFixed(1)} BPM`;
-  const debug=String(M.debug||"0:0").split(":"); el("debug").textContent=`EVENTS ${debug[0]||0} / PEAK ${debug[1]||0}`;
+  const debug=String(M.debug||"0:0:0").split(":"),events=Number(debug[0]||0),peak=Number(debug[2]||debug[1]||0);
+  el("debug").textContent=`EVENTS ${events} / PEAK ${peak}`;
+  if(lastEventCount>=0&&events>lastEventCount)auditionMessage(peak>0?`MOVE RECEIVED NOTE · AUDIO PEAK ${peak}`:"MOVE RECEIVED NOTE · NO AUDIO PEAK",peak<=0);
+  lastEventCount=events;
 }
 schwungRemote.onParamChange(params=>{
   for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix)continue;if(!PREFIX)PREFIX=prefix;if(prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];}else if(name==="state"){try{Object.assign(M,JSON.parse(String(params[key])));}catch(e){M.state=params[key];}}else M[name]=params[key];}
   render();
 });
-if(typeof schwungRemote.resubscribe==="function")setInterval(()=>schwungRemote.resubscribe(),500);
 </script>
 </body>
 </html>
