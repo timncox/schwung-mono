@@ -107,7 +107,11 @@ struct mono {
     float master;
     uint32_t revision;
     uint32_t note_events;
+    uint32_t render_blocks;
+    uint32_t nonzero_blocks;
     int render_peak;
+    int lifetime_peak;
+    uint32_t nonfinite_samples;
     float wavetable[MONO_WAVES][MONO_WAVE_LEN];
     mono_track_t track[MONO_MAX_TRACKS];
 };
@@ -585,14 +589,28 @@ static float cutoff_from_param(float p) {
 
 static float svf(mono_svf_t *s, float in, float hz, float resonance,
                  int sample_rate, int highpass) {
-    hz = fclamp(hz, 15.0f, sample_rate * 0.22f);
-    float f = 2.0f * sinf((float)M_PI * hz / sample_rate);
-    f = fclamp(f, 0.001f, 0.99f);
-    float damp = 2.0f - 1.88f * fclamp(resonance, 0.0f, 1.0f);
-    s->low += f * s->band;
-    float high = in - s->low - damp * s->band;
-    s->band += f * high;
-    return highpass ? high : s->low;
+    /* Topology-preserving state-variable filter. The former Chamberlin
+     * integrator became unstable at the default wide-open cutoff, poisoning
+     * its state with NaNs after a few blocks and silencing every later note. */
+    hz = fclamp(hz, 15.0f, sample_rate * 0.45f);
+    float g = tanf((float)M_PI * hz / sample_rate);
+    float k = 2.0f - 1.95f * fclamp(resonance, 0.0f, 1.0f);
+    float a1 = 1.0f / (1.0f + g * (g + k));
+    float a2 = g * a1;
+    float a3 = g * a2;
+    float v3 = in - s->low;
+    float band = a1 * s->band + a2 * v3;
+    float low = s->low + a2 * s->band + a3 * v3;
+    s->band = 2.0f * band - s->band;
+    s->low = 2.0f * low - s->low;
+    float high = in - k * band - low;
+    if (!isfinite(high) || !isfinite(low) || !isfinite(s->band) ||
+        !isfinite(s->low)) {
+        s->band = 0.0f;
+        s->low = 0.0f;
+        return 0.0f;
+    }
+    return highpass ? high : low;
 }
 
 static float render_track(mono_t *m, mono_track_t *t, float *right) {
@@ -738,6 +756,14 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
         }
         l = tanhf(l * m->master);
         r = tanhf(r * m->master);
+        if (!isfinite(l)) {
+            l = 0.0f;
+            ++m->nonfinite_samples;
+        }
+        if (!isfinite(r)) {
+            r = 0.0f;
+            ++m->nonfinite_samples;
+        }
         out_lr[i * 2] = (int16_t)lrintf(fclamp(l, -1.0f, 1.0f) * 32767.0f);
         out_lr[i * 2 + 1] = (int16_t)lrintf(fclamp(r, -1.0f, 1.0f) * 32767.0f);
         int al = out_lr[i * 2] < 0 ? -out_lr[i * 2] : out_lr[i * 2];
@@ -746,6 +772,9 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
         if (ar > peak) peak = ar;
     }
     m->render_peak = peak;
+    ++m->render_blocks;
+    if (peak > 0) ++m->nonzero_blocks;
+    if (peak > m->lifetime_peak) m->lifetime_peak = peak;
 }
 
 void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
@@ -931,7 +960,13 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f",
                         m->transport, m->seq_step, bpm_now(m));
     if (!strcmp(key, "debug"))
-        return snprintf(buf, (size_t)buf_len, "%u:%d", m->note_events, m->render_peak);
+        return snprintf(buf, (size_t)buf_len,
+                        "%u:%d:%d:%u:%u:%u:%d:%d:%d:%d:%d:%d:%d",
+                        m->note_events, m->render_peak, m->lifetime_peak,
+                        m->render_blocks, m->nonzero_blocks, m->nonfinite_samples,
+                        m->sample_rate, t->note, t->velocity, t->amp.stage,
+                        (int)lrintf(t->amp.value * 1000.0f),
+                        (int)lrintf(t->freq * 10.0f), t->base[13]);
     if (!strcmp(key, "state")) {
         char step_csv[96];
         int sn = 0;
@@ -950,7 +985,8 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                         "\"bpm\":%.1f,\"master\":%.0f,\"machine\":%d,"
                         "\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
                         "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
-                        "\"steps\":\"%s\",\"debug\":\"%u:%d\"}",
+                        "\"steps\":\"%s\","
+                        "\"debug\":\"%u:%d:%d:%u:%u:%u:%d:%d:%d:%d:%d:%d:%d\"}",
                         m->selected_track, m->selected_page, m->step_page,
                         m->pattern_len, m->transport, m->seq_step,
                         bpm_now(m), m->master * 100.0f, t->machine,
@@ -958,7 +994,11 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                         t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
                         t->base[m->selected_page * 8 + 4], t->base[m->selected_page * 8 + 5],
                         t->base[m->selected_page * 8 + 6], t->base[m->selected_page * 8 + 7],
-                        step_csv, m->note_events, m->render_peak);
+                        step_csv, m->note_events, m->render_peak, m->lifetime_peak,
+                        m->render_blocks, m->nonzero_blocks, m->nonfinite_samples,
+                        m->sample_rate, t->note, t->velocity, t->amp.stage,
+                        (int)lrintf(t->amp.value * 1000.0f),
+                        (int)lrintf(t->freq * 10.0f), t->base[13]);
     }
     return -1;
 }

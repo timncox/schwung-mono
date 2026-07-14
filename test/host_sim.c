@@ -83,6 +83,34 @@ static void test_note_release(void) {
     mono_destroy(m);
 }
 
+static void test_filters_remain_finite_and_retrigger(void) {
+    for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
+        mono_t *m = mono_create(&host, 1);
+        assert(m);
+        char value[16];
+        snprintf(value, sizeof(value), "%d", machine);
+        mono_set_param(m, "machine", value);
+        mono_note_on(m, 0, 48 + machine, 112);
+        assert(render_energy(m, 400) > 1000);
+
+        char debug[256];
+        unsigned notes, blocks, nonzero, nonfinite;
+        int peak, lifetime;
+        get_string(m, "debug", debug, sizeof(debug));
+        assert(sscanf(debug, "%u:%d:%d:%u:%u:%u",
+                      &notes, &peak, &lifetime, &blocks, &nonzero,
+                      &nonfinite) == 6);
+        assert(notes == 1);
+        assert(lifetime > 0);
+        assert(nonzero > 0);
+        assert(nonfinite == 0);
+
+        mono_note_on(m, 0, 60 + machine, 112);
+        assert(render_energy(m, 4) > 1000);
+        mono_destroy(m);
+    }
+}
+
 static void test_parameter_aliases(void) {
     mono_t *m = mono_create(&host, 1);
     assert(m);
@@ -209,6 +237,7 @@ static void test_remote_state_contract(void) {
 int main(void) {
     test_all_machines_sound_distinct();
     test_note_release();
+    test_filters_remain_finite_and_retrigger();
     test_parameter_aliases();
     test_sequencer_and_lock();
     test_internal_clock();
