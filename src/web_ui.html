@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mono Remote</title>
+<style>
+  :root {
+    --case:#c9c8bf; --case-hi:#e5e3d8; --case-lo:#8f8f88;
+    --ink:#121312; --panel:#20221f; --lcd:#a9d592; --lcd-ink:#132718;
+    --red:#e52b25; --green:#7ba85c; --line:#5a5c56; --cream:#f1efe3;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; color:var(--ink); background:#161715;
+    font:700 12px/1.25 Arial,Helvetica,sans-serif; letter-spacing:.035em; }
+  button,input { font:inherit; }
+  .machine { width:min(1180px,calc(100% - 24px)); margin:12px auto 32px; padding:14px;
+    border:2px solid #f0eee5; border-right-color:#777871; border-bottom-color:#666761;
+    border-radius:7px; background:linear-gradient(145deg,var(--case-hi),var(--case) 42%,#b1b1aa);
+    box-shadow:0 16px 45px #000a, inset 0 0 0 1px #777; }
+  .top { display:grid; grid-template-columns:minmax(270px,1.2fr) minmax(260px,2fr) auto;
+    gap:12px; align-items:stretch; }
+  .brand { padding:5px 7px; border-left:10px solid var(--red); }
+  .brand b { display:block; font-size:25px; line-height:.95; letter-spacing:.14em; }
+  .brand span { display:block; margin-top:7px; font-size:9px; letter-spacing:.22em; }
+  .lcd { min-height:64px; padding:9px 12px; color:var(--lcd-ink); background:var(--lcd);
+    border:5px solid #262824; border-radius:3px; box-shadow:inset 0 0 12px #24472266;
+    font:700 13px/1.25 "Courier New",monospace; text-transform:uppercase; }
+  .lcd .big { font-size:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lcd .sub { margin-top:8px; display:flex; justify-content:space-between; opacity:.85; }
+  .status { min-width:140px; display:grid; gap:6px; align-content:center; }
+  .lamp { display:flex; align-items:center; gap:7px; }
+  .led { width:9px; height:9px; border-radius:50%; background:#55211e; box-shadow:inset 0 0 2px #000; }
+  .online .led { background:#9bd579; box-shadow:0 0 9px #8de069; }
+  .section { margin-top:12px; border-top:2px solid var(--line); padding-top:9px; }
+  .legend { margin-bottom:7px; font-size:10px; letter-spacing:.15em; }
+  .tabs { display:flex; flex-wrap:wrap; gap:5px; }
+  button { min-height:30px; border:1px solid #292a27; border-bottom-width:3px; border-radius:3px;
+    color:#e9e7dc; background:linear-gradient(#484a45,#292b28); cursor:pointer; padding:5px 10px; }
+  button:hover { filter:brightness(1.14); }
+  button:active { transform:translateY(1px); border-bottom-width:2px; }
+  button.active { color:#fff; background:linear-gradient(#e44b43,#a91510); border-color:#6d0b08; }
+  button.green.active { background:linear-gradient(#8eb66e,#4f7738); border-color:#355228; }
+  .machines button { flex:1 1 110px; }
+  .pages button { flex:1 1 88px; }
+  .tracks button { min-width:48px; }
+  .control-grid { display:grid; grid-template-columns:repeat(8,minmax(75px,1fr)); gap:7px; }
+  .control { min-width:0; padding:8px 6px; text-align:center; color:#eee; background:var(--panel);
+    border:1px solid #050505; border-radius:3px; box-shadow:inset 0 0 0 1px #555; }
+  .control label { display:block; height:28px; font-size:10px; overflow:hidden; }
+  .value { display:inline-block; min-width:36px; margin-top:4px; padding:3px 2px; color:var(--lcd-ink);
+    background:var(--lcd); border:2px solid #080908; font:700 13px "Courier New",monospace; }
+  input[type=range] { width:100%; accent-color:var(--red); }
+  .lower { display:grid; grid-template-columns:1.25fr .75fr; gap:12px; }
+  .sequencer,.keyboard { padding:9px; color:#eee; background:#242622; border:1px solid #090a09; }
+  .seqbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+  .seqbar .spacer { flex:1; }
+  .steps { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
+  .step { min-width:0; padding:4px; height:30px; color:#aaa; }
+  .step.on { color:#fff; background:#b41d19; }
+  .step.locked { color:#fff; background:#713d88; }
+  .step.playing { outline:2px solid #dbf5c4; outline-offset:1px; }
+  .keys { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
+  .key { height:48px; color:#181916; background:linear-gradient(#fbfaf4,#c9c8c0); border-color:#686963; }
+  .key.black { color:#eee; background:linear-gradient(#454641,#161714); }
+  .key.held { background:var(--red); color:#fff; }
+  .master { display:grid; grid-template-columns:auto 1fr 40px; gap:8px; align-items:center; margin-top:9px; }
+  .hint { margin-top:8px; color:#b8b9b2; font-size:10px; font-weight:400; }
+  #offline { margin-top:12px; padding:14px; color:#322; background:#e7b2ad; border:1px solid #7e1d18; }
+  @media(max-width:850px) {
+    .top,.lower { grid-template-columns:1fr; }
+    .control-grid { grid-template-columns:repeat(4,1fr); }
+  }
+  @media(max-width:480px) {
+    .machine { width:100%; margin:0; border-radius:0; }
+    .control-grid { grid-template-columns:repeat(2,1fr); }
+    .steps { grid-template-columns:repeat(4,1fr); }
+  }
+</style>
+</head>
+<body>
+<main class="machine">
+  <div class="top">
+    <div class="brand"><b>MONO</b><span>DIGITAL MACHINE LABORATORY</span></div>
+    <div class="lcd"><div class="big" id="screen">WAITING FOR MOVE</div>
+      <div class="sub"><span id="screenPage">NO SIGNAL</span><span id="screenTempo">--- BPM</span></div></div>
+    <div class="status" id="connection"><div class="lamp"><i class="led"></i><span id="connectionText">OFFLINE</span></div>
+      <span id="mode">REMOTE INTERFACE</span><span id="debug">EVENTS --- / PEAK ---</span></div>
+  </div>
+
+  <div id="offline">Load <b>Mono Voice</b> in a track or activate the <b>Mono</b> Overtake tool. This panel connects automatically.</div>
+  <div id="ui" hidden>
+    <section class="section tracks" id="trackSection"><div class="legend">TRACK SELECT</div><div class="tabs" id="tracks"></div></section>
+    <section class="section machines"><div class="legend">MACHINE</div><div class="tabs" id="machines"></div></section>
+    <section class="section pages"><div class="legend">PARAMETER PAGE</div><div class="tabs" id="pages"></div></section>
+    <section class="section"><div class="control-grid" id="controls"></div>
+      <div class="master"><span>MASTER</span><input id="master" type="range" min="0" max="200" value="100"><output id="masterValue">100</output></div>
+    </section>
+    <section class="section lower">
+      <div class="sequencer" id="sequencer">
+        <div class="seqbar"><button id="play" class="green">PLAY</button><button id="pageDown">◀ 16</button><button id="pageUp">16 ▶</button>
+          <span class="spacer"></span><span id="stepRange">STEPS 01–16</span></div>
+        <div class="steps" id="steps"></div>
+        <div class="hint">Click a step to toggle it. Purple steps contain parameter locks.</div>
+      </div>
+      <div class="keyboard"><div class="legend">AUDITION / EVENT TEST</div><div class="keys" id="keys"></div>
+        <div class="hint">Computer keys: A W S E D F T G Y H U J K. If EVENTS rises but PEAK stays zero, the DSP route is silent.</div></div>
+    </section>
+  </div>
+</main>
+
+<script src="/static/schwung-remote-api.js"></script>
+<script>
+"use strict";
+const MACHINES = ["SW SAW","SW PULSE","SW ENS","SID 6581","DIGIPRO","FM+STAT"];
+const PAGES = ["SYNTH","AMP","FILTER","EFFECT","LFO 1","LFO 2","LFO 3"];
+const COMMON = [null,
+  ["ATK","HOLD","DEC","REL","DIST","VOL","PAN","PORT"],
+  ["BASE","WIDTH","HP Q","LP Q","F ATK","F DEC","F BASE","F WIDTH"],
+  ["EQ FREQ","EQ GAIN","SR RED","D SEND","D TIME","D FB","D BASE","D WIDTH"],
+  ["DEST","TRIG","WAVE","MULT","SPEED","INTERL","DEPTH","PHASE"],
+  ["DEST","TRIG","WAVE","MULT","SPEED","INTERL","DEPTH","PHASE"],
+  ["DEST","TRIG","WAVE","MULT","SPEED","INTERL","DEPTH","PHASE"]];
+const SYNTH = [
+  ["UNISON L","UNISON W","UNISON X","SUB MIX","SUB 1","SUB 2","—","TUNE"],
+  ["UNISON L","UNISON W","UNISON X","P WIDTH","PW ATK","PW RST","—","TUNE"],
+  ["PITCH 2","PITCH 3","PITCH 4","WAVE","P WIDTH","CHORUS L","CHORUS W","TUNE"],
+  ["P WIDTH","PW ATK","PW RST","WAVE","MOD","MOD SRC","MOD FREQ","TUNE"],
+  ["WAVE","WAVE POS","WAVE MOD","WAVE RST","SYNC","SYNC FREQ","—","TUNE"],
+  ["OP1 FREQ","OP1 FINE","OP1 FB","OP1 ENV","OP2 FREQ","OP2 VOL","TONE","TUNE"]];
+const KEY_NOTES = [48,49,50,51,52,53,54,55,56,57,58,59,60];
+const KEYBOARD = ["a","w","s","e","d","f","t","g","y","h","u","j","k"];
+const BLACK = new Set([1,3,6,8,10]);
+let PREFIX = null;
+const M = {};
+const touched = {};
+const held = new Set();
+const el = id => document.getElementById(id);
+const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[key]);
+const labels = () => number("page") === 0 ? SYNTH[number("machine")] : COMMON[number("page")];
+function send(key, value) {
+  if (!PREFIX) return;
+  M[key] = String(value);
+  schwungRemote.setParam(PREFIX + key, String(value));
+}
+function makeButtons(root, names, action) {
+  names.forEach((name, i) => { const b=document.createElement("button"); b.textContent=name; b.onclick=()=>action(i); root.appendChild(b); });
+}
+makeButtons(el("tracks"), ["T1","T2","T3","T4","T5","T6"], i=>{send("track",i); render();});
+makeButtons(el("machines"), MACHINES, i=>{send("machine",i); render();});
+makeButtons(el("pages"), PAGES, i=>{send("page",i); render();});
+for (let i=0;i<8;i++) {
+  const box=document.createElement("div"); box.className="control";
+  box.innerHTML=`<label id="label${i}">P${i+1}</label><input id="p${i+1}" type="range" min="0" max="127"><output class="value" id="value${i}">000</output>`;
+  el("controls").appendChild(box);
+  const slider=el(`p${i+1}`);
+  slider.oninput=()=>{touched[`p${i+1}`]=Date.now(); el(`value${i}`).value=String(slider.value).padStart(3,"0"); send(`p${i+1}`,slider.value);};
+}
+for (let i=0;i<16;i++) {
+  const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
+  b.onclick=()=>send("toggle_step",number("step_page")*16+i); el("steps").appendChild(b);
+}
+function noteOn(note, button) { if (held.has(note)) return; held.add(note); button && button.classList.add("held"); send("note_on",`${note}:112`); }
+function noteOff(note, button) { if (!held.has(note)) return; held.delete(note); button && button.classList.remove("held"); send("note_off",note); }
+KEY_NOTES.forEach((note,i)=>{
+  const b=document.createElement("button"); b.className="key"+(BLACK.has(note%12)?" black":""); b.textContent=KEYBOARD[i].toUpperCase();
+  b.onpointerdown=e=>{e.preventDefault(); b.setPointerCapture(e.pointerId); noteOn(note,b);};
+  b.onpointerup=b.onpointercancel=e=>noteOff(note,b);
+  el("keys").appendChild(b);
+});
+window.addEventListener("keydown",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0&&!e.repeat)noteOn(KEY_NOTES[i],el("keys").children[i]);});
+window.addEventListener("keyup",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0)noteOff(KEY_NOTES[i],el("keys").children[i]);});
+window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)]));});
+el("play").onclick=()=>{send("transport",number("transport")?0:1); render();};
+function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render(); if(schwungRemote.resubscribe)schwungRemote.resubscribe();}
+el("pageDown").onclick=()=>changeStepPage(-1); el("pageUp").onclick=()=>changeStepPage(1);
+el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
+
+function syncRange(id,value,out) {
+  if(Date.now()-(touched[id]||0)>800 && document.activeElement!==el(id)) el(id).value=value;
+  if(out) el(out).value=String(value).padStart(id==="master"?1:3,"0");
+}
+function render() {
+  if(!PREFIX) return;
+  el("offline").hidden=true; el("ui").hidden=false; el("connection").classList.add("online");
+  el("connectionText").textContent="CONNECTED";
+  const voice=PREFIX==="synth:"; el("mode").textContent=voice?"MONO VOICE / SLOT":"MONO / OVERTAKE";
+  el("trackSection").hidden=voice; el("sequencer").hidden=voice;
+  const machine=Math.max(0,Math.min(5,number("machine"))), page=Math.max(0,Math.min(6,number("page")));
+  const track=Math.max(0,Math.min(5,number("track"))), stepPage=Math.max(0,Math.min(3,number("step_page")));
+  [...el("tracks").children].forEach((b,i)=>b.classList.toggle("active",i===track));
+  [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
+  [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
+  const names=labels(); for(let i=0;i<8;i++){el(`label${i}`).textContent=names[i]; syncRange(`p${i+1}`,number(`p${i+1}`),`value${i}`);}
+  syncRange("master",number("master",100),"masterValue");
+  const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
+  [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});
+  el("play").classList.toggle("active",!!number("transport")); el("play").textContent=number("transport")?"STOP":"PLAY";
+  el("stepRange").textContent=`STEPS ${String(stepPage*16+1).padStart(2,"0")}–${String(stepPage*16+16).padStart(2,"0")}`;
+  el("screen").textContent=voice?`${MACHINES[machine]} · VOICE`:`T${track+1} · ${MACHINES[machine]}`;
+  el("screenPage").textContent=`${PAGES[page]} / ${number("pattern_len",16)} STEPS`;
+  el("screenTempo").textContent=`${Number(number("bpm",120)).toFixed(1)} BPM`;
+  const debug=String(M.debug||"0:0").split(":"); el("debug").textContent=`EVENTS ${debug[0]||0} / PEAK ${debug[1]||0}`;
+}
+schwungRemote.onParamChange(params=>{
+  for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix)continue;if(!PREFIX)PREFIX=prefix;if(prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];}else M[name]=params[key];}
+  render();
+});
+if(typeof schwungRemote.resubscribe==="function")setInterval(()=>schwungRemote.resubscribe(),500);
+</script>
+</body>
+</html>

@@ -22,10 +22,12 @@ mkdir -p build/modules/sound_generators/mono-voice build/modules/overtake/mono
 cp modules/sound_generators/mono-voice/module.json build/modules/sound_generators/mono-voice/
 cp src/ui_chain.js build/modules/sound_generators/mono-voice/
 cp src/help_voice.json build/modules/sound_generators/mono-voice/help.json
+cp src/web_ui.html build/modules/sound_generators/mono-voice/
 
 cp modules/overtake/mono/module.json build/modules/overtake/mono/
 cp src/ui_overtake.js build/modules/overtake/mono/ui.js
 cp src/help_mono.json build/modules/overtake/mono/help.json
+cp src/web_ui.html build/modules/overtake/mono/
 
 docker run --rm -v "$PWD":/w -w /w "$IMAGE" bash -c "
     set -e

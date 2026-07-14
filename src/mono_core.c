@@ -105,6 +105,9 @@ struct mono {
     double internal_frames;
     float bpm_override;
     float master;
+    uint32_t revision;
+    uint32_t note_events;
+    int render_peak;
     float wavetable[MONO_WAVES][MONO_WAVE_LEN];
     mono_track_t track[MONO_MAX_TRACKS];
 };
@@ -115,6 +118,10 @@ static float fclamp(float v, float lo, float hi) {
 
 static int iclamp(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static void changed(mono_t *m) {
+    if (m) ++m->revision;
 }
 
 static float midi_freq(float note) {
@@ -398,15 +405,22 @@ static void track_trigger(mono_t *m, mono_track_t *t, int note,
     }
     if (trig_mask & TRIG_LFO)
         for (int i = 0; i < 3; ++i) lfo_trigger(&t->lfo[i], t->effective + (4 + i) * 8);
-    float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
-    t->gate_left = (int)(frames_per_step * fclamp(gate / 127.0f, 0.03f, 1.0f));
+    if (gate > 0) {
+        float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
+        t->gate_left = (int)(frames_per_step * fclamp(gate / 127.0f, 0.03f, 1.0f));
+    } else {
+        /* A played note belongs to the performer until note-off. Sequencer
+         * trigs pass their positive gate value and retain step-length gates. */
+        t->gate_left = 0;
+    }
 }
 
 void mono_note_on(mono_t *m, int track, int note, int velocity) {
     if (!m || track < 0 || track >= m->track_count) return;
     mono_track_t *t = &m->track[track];
     memcpy(t->effective, t->base, MONO_PARAMS);
-    track_trigger(m, t, iclamp(note, 0, 127), velocity, 15, 127);
+    track_trigger(m, t, iclamp(note, 0, 127), velocity, 15, 0);
+    ++m->note_events;
 }
 
 void mono_note_off(mono_t *m, int track, int note) {
@@ -713,6 +727,7 @@ static void internal_clock_tick(mono_t *m) {
 
 void mono_render(mono_t *m, int16_t *out_lr, int frames) {
     if (!m || !out_lr || frames <= 0) return;
+    int peak = 0;
     for (int i = 0; i < frames; ++i) {
         internal_clock_tick(m);
         float l = 0.0f, r = 0.0f;
@@ -725,7 +740,12 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
         r = tanhf(r * m->master);
         out_lr[i * 2] = (int16_t)lrintf(fclamp(l, -1.0f, 1.0f) * 32767.0f);
         out_lr[i * 2 + 1] = (int16_t)lrintf(fclamp(r, -1.0f, 1.0f) * 32767.0f);
+        int al = out_lr[i * 2] < 0 ? -out_lr[i * 2] : out_lr[i * 2];
+        int ar = out_lr[i * 2 + 1] < 0 ? -out_lr[i * 2 + 1] : out_lr[i * 2 + 1];
+        if (al > peak) peak = al;
+        if (ar > peak) peak = ar;
     }
+    m->render_peak = peak;
 }
 
 void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
@@ -754,11 +774,17 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
     int kind = st & 0xF0;
     int channel = st & 0x0F;
     int track = m->track_count == 1 ? 0 : channel % m->track_count;
-    /* In overtake mode the JS owns internal pads and sends note_on params;
-     * accepting them here too would make track-select pads sound notes. */
-    if (m->track_count > 1 && source == MOVE_MIDI_SOURCE_INTERNAL) return;
-    if (kind == 0x90 && msg[2] > 0) mono_note_on(m, track, msg[1], msg[2]);
-    else if (kind == 0x80 || (kind == 0x90 && msg[2] == 0)) mono_note_off(m, track, msg[1]);
+    int note = msg[1];
+    if (m->track_count > 1 && source == MOVE_MIDI_SOURCE_INTERNAL) {
+        /* Overtake receives raw Move pad note IDs. Let the DSP own the lower
+         * three rows directly so sound never depends on an asynchronous JS
+         * parameter round-trip; the top row remains reserved for controls. */
+        if (note < 68 || note >= 92) return;
+        track = m->selected_track;
+        note = 48 + note - 68;
+    }
+    if (kind == 0x90 && msg[2] > 0) mono_note_on(m, track, note, msg[2]);
+    else if (kind == 0x80 || (kind == 0x90 && msg[2] == 0)) mono_note_off(m, track, note);
 }
 
 static int param_id(const mono_t *m, const char *key) {
@@ -800,12 +826,12 @@ static void set_lock(mono_t *m, const char *val, int clear) {
 void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!m || !key || !val) return;
     int v = atoi(val);
-    if (!strcmp(key, "track")) { m->selected_track = iclamp(v, 0, m->track_count - 1); return; }
-    if (!strcmp(key, "page")) { m->selected_page = iclamp(v, 0, MONO_PAGES - 1); return; }
-    if (!strcmp(key, "step_page")) { m->step_page = iclamp(v, 0, 3); return; }
-    if (!strcmp(key, "pattern_len")) { m->pattern_len = iclamp(v, 1, MONO_STEPS); return; }
-    if (!strcmp(key, "bpm_override")) { m->bpm_override = fclamp(strtof(val, NULL), 0, 400); return; }
-    if (!strcmp(key, "master")) { m->master = fclamp(strtof(val, NULL) / 100.0f, 0, 2); return; }
+    if (!strcmp(key, "track")) { m->selected_track = iclamp(v, 0, m->track_count - 1); changed(m); return; }
+    if (!strcmp(key, "page")) { m->selected_page = iclamp(v, 0, MONO_PAGES - 1); changed(m); return; }
+    if (!strcmp(key, "step_page")) { m->step_page = iclamp(v, 0, 3); changed(m); return; }
+    if (!strcmp(key, "pattern_len")) { m->pattern_len = iclamp(v, 1, MONO_STEPS); changed(m); return; }
+    if (!strcmp(key, "bpm_override")) { m->bpm_override = fclamp(strtof(val, NULL), 0, 400); changed(m); return; }
+    if (!strcmp(key, "master")) { m->master = fclamp(strtof(val, NULL) / 100.0f, 0, 2); changed(m); return; }
     if (!strcmp(key, "transport")) {
         if (v && !m->transport) {
             m->seq_step = -1;
@@ -814,14 +840,16 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         }
         m->transport = v != 0;
         if (!m->transport) { m->external_clock = 0; m->external_clock_age = 0; }
+        changed(m);
         return;
     }
     mono_track_t *t = &m->track[m->selected_track];
-    if (!strcmp(key, "machine")) { select_machine(t, v); return; }
+    if (!strcmp(key, "machine")) { select_machine(t, v); changed(m); return; }
     int pid = param_id(m, key);
     if (pid >= 0) {
         t->base[pid] = (uint8_t)iclamp(v, 0, 127);
         t->effective[pid] = t->base[pid];
+        changed(m);
         return;
     }
     if (!strcmp(key, "toggle_step")) {
@@ -829,6 +857,7 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         mono_step_t *s = &t->steps[step];
         if (s->note >= 0 || s->trig_mask) clear_step(s);
         else { s->note = (int8_t)t->last_note; s->velocity = 100; s->gate = 100; s->trig_mask = 15; }
+        changed(m);
         return;
     }
     if (!strcmp(key, "set_step")) {
@@ -840,14 +869,16 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
             s->velocity = (uint8_t)iclamp(vel, 1, 127);
             s->gate = (uint8_t)iclamp(gate, 1, 127);
             s->trig_mask = (uint8_t)iclamp(mask, 0, 15);
+            changed(m);
         }
         return;
     }
-    if (!strcmp(key, "lock")) { set_lock(m, val, 0); return; }
-    if (!strcmp(key, "unlock")) { set_lock(m, val, 1); return; }
+    if (!strcmp(key, "lock")) { set_lock(m, val, 0); changed(m); return; }
+    if (!strcmp(key, "unlock")) { set_lock(m, val, 1); changed(m); return; }
     if (!strcmp(key, "clear_pattern") && v) {
         for (int ti = 0; ti < m->track_count; ++ti)
             for (int s = 0; s < MONO_STEPS; ++s) clear_step(&m->track[ti].steps[s]);
+        changed(m);
         return;
     }
     if (!strcmp(key, "note_on")) {
@@ -893,5 +924,41 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         return snprintf(buf, (size_t)buf_len, "%d:%d:%.1f:%d:%d:%d:%d",
                         m->transport, m->seq_step, bpm_now(m), m->selected_track,
                         m->selected_page, t->machine, m->pattern_len);
+    if (!strcmp(key, "rui_poll"))
+        return snprintf(buf, (size_t)buf_len, "%u:%d:%d:%.0f",
+                        m->revision, m->transport, m->seq_step, bpm_now(m));
+    if (!strcmp(key, "rui_play"))
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f",
+                        m->transport, m->seq_step, bpm_now(m));
+    if (!strcmp(key, "debug"))
+        return snprintf(buf, (size_t)buf_len, "%u:%d", m->note_events, m->render_peak);
+    if (!strcmp(key, "state")) {
+        char step_csv[96];
+        int sn = 0;
+        int first = m->step_page * 16;
+        for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
+            mono_step_t *s = &t->steps[first + i];
+            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int wrote = snprintf(step_csv + sn, sizeof(step_csv) - (size_t)sn,
+                                 "%s%d", i ? "," : "", state);
+            if (wrote < 0 || wrote >= (int)sizeof(step_csv) - sn) break;
+            sn += wrote;
+        }
+        return snprintf(buf, (size_t)buf_len,
+                        "{\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                        "\"pattern_len\":%d,\"transport\":%d,\"play_step\":%d,"
+                        "\"bpm\":%.1f,\"master\":%.0f,\"machine\":%d,"
+                        "\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
+                        "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
+                        "\"steps\":\"%s\",\"debug\":\"%u:%d\"}",
+                        m->selected_track, m->selected_page, m->step_page,
+                        m->pattern_len, m->transport, m->seq_step,
+                        bpm_now(m), m->master * 100.0f, t->machine,
+                        t->base[m->selected_page * 8], t->base[m->selected_page * 8 + 1],
+                        t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
+                        t->base[m->selected_page * 8 + 4], t->base[m->selected_page * 8 + 5],
+                        t->base[m->selected_page * 8 + 6], t->base[m->selected_page * 8 + 7],
+                        step_csv, m->note_events, m->render_peak);
+    }
     return -1;
 }

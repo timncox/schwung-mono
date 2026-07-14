@@ -39,6 +39,7 @@ let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let patternLen = 16, playStep = -1, shift = false, tickCount = 0;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
+let focusBank = 0;
 
 function gp(key) {
     const v = host_module_get_param(key);
@@ -73,6 +74,7 @@ function selectTrack(next) {
 
 function setPage(next) {
     page = (next + PAGES.length) % PAGES.length;
+    focusBank = 0;
     host_module_set_param('page', `${page}`);
     fetchAll(); needsRedraw = true;
     announce(`${PAGES[page]} page`);
@@ -93,6 +95,7 @@ function cycleMachine(delta) {
 }
 
 function adjust(i, delta) {
+    focusBank = i >= 4 ? 1 : 0;
     let v = Math.max(0, Math.min(127, values[i] + delta));
     if (v === values[i]) return;
     values[i] = v;
@@ -143,15 +146,18 @@ function paintAll(force) { paintTracks(force); paintGlobals(force); paintSteps(f
 
 function draw() {
     clear_screen();
-    drawHeader(`MONO T${track + 1} · ${MACHINES[machine]}`);
+    drawHeader(`MONO · T${track + 1} ${MACHINES[machine]}`);
     const n = names();
-    for (let i = 0; i < 8; i++) {
-        const x = i * 16;
+    const first = focusBank * 4;
+    for (let column = 0; column < 4; column++) {
+        const i = first + column;
+        const x = column * 32 + 2;
         print(x, 18, n[i], 1);
-        print(x, 34, `${values[i]}`, 1);
+        print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
     }
-    drawFooter({left: `${PAGES[page]} ${stepPage + 1}/4`,
-                right: heldStep ? (shift ? 'turn=unlock' : 'turn=lock') : `${patternLen} steps`});
+    drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
+                right: heldStep ? (shift ? 'turn=unlock' : 'turn=lock')
+                    : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
     needsRedraw = false;
 }
 
@@ -207,10 +213,7 @@ globalThis.onMidiMessageInternal = function(data) {
             if (editedLock) fetchAll();
             paintSteps(false); needsRedraw = true; return;
         }
-        if (d1 >= 68 && d1 < 92) {
-            host_module_set_param('note_off', `${48 + d1 - 68}`);
-            return;
-        }
+        if (d1 >= 68 && d1 < 92) return;
         return;
     }
 
@@ -222,9 +225,7 @@ globalThis.onMidiMessageInternal = function(data) {
         for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) { selectTrack(i); return; }
         if (d1 === PAD_MACHINE) { cycleMachine(shift ? -1 : 1); return; }
         if (d1 === PAD_TRANSPORT) { toggleTransport(); return; }
-        if (d1 >= 68 && d1 < 92) {
-            host_module_set_param('note_on', `${48 + d1 - 68}:${d2}`);
-        }
+        if (d1 >= 68 && d1 < 92) return;
     }
 };
 

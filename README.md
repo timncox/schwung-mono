@@ -60,6 +60,11 @@ scripts/deploy.sh
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
 
+The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
+automatically focuses that bank, while all eight knobs remain active. Schwung's
+Remote UI opens a full editor for either build, including a browser keyboard
+for quickly checking the note and audio path.
+
 ## Clean-room scope
 
 Mono contains no Elektron firmware, factory wavetables, factory samples, or

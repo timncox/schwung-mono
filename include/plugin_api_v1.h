@@ -49,4 +49,8 @@ typedef struct plugin_api_v2 {
     void (*render_block)(void *instance, int16_t *out_interleaved_lr, int frames);
 } plugin_api_v2_t;
 
+typedef plugin_api_v2_t *(*move_plugin_init_v2_fn)(const host_api_v1_t *host);
+
+#define MOVE_PLUGIN_INIT_V2_SYMBOL "move_plugin_init_v2"
+
 #endif

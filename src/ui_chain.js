@@ -29,7 +29,7 @@ const SYNTH = [
 ];
 
 let page = 0, machine = 0, shift = false, values = new Array(8).fill(0);
-let needsRedraw = true, ready = false;
+let needsRedraw = true, ready = false, focusBank = 0;
 
 function gp(key) {
     const v = host_module_get_param(key);
@@ -49,6 +49,7 @@ function fetchAll() {
 
 function setPage(next) {
     page = (next + PAGES.length) % PAGES.length;
+    focusBank = 0;
     host_module_set_param('page', `${page}`);
     fetchAll();
     announce(`${PAGES[page]} page`);
@@ -64,6 +65,7 @@ function setMachine(next) {
 }
 
 function adjust(i, delta) {
+    focusBank = i >= 4 ? 1 : 0;
     const v = Math.max(0, Math.min(127, values[i] + delta));
     if (v === values[i]) return;
     values[i] = v;
@@ -74,14 +76,17 @@ function adjust(i, delta) {
 
 function draw() {
     clear_screen();
-    drawHeader(`MONO VOICE · ${MACHINES[machine]}`);
+    drawHeader(`MONO V · ${MACHINES[machine]}`);
     const n = names();
-    for (let i = 0; i < 8; i++) {
-        const x = i * 16;
+    const first = focusBank * 4;
+    for (let column = 0; column < 4; column++) {
+        const i = first + column;
+        const x = column * 32 + 2;
         print(x, 18, n[i], 1);
-        print(x, 34, `${values[i]}`, 1);
+        print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
     }
-    drawFooter({left: PAGES[page], right: shift ? 'jog=machine' : 'jog=page'});
+    drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
+                right: shift ? 'jog=machine' : 'jog=page'});
     needsRedraw = false;
 }
 

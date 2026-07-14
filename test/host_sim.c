@@ -48,6 +48,10 @@ static int get_int(mono_t *m, const char *key) {
     return atoi(buf);
 }
 
+static void get_string(mono_t *m, const char *key, char *buf, size_t size) {
+    assert(mono_get_param(m, key, buf, (int)size) >= 0);
+}
+
 static void test_all_machines_sound_distinct(void) {
     uint64_t hashes[MONO_MACHINE_COUNT];
     for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
@@ -157,6 +161,51 @@ static void test_six_tracks_render_together(void) {
     mono_destroy(m);
 }
 
+static void test_production_event_paths(void) {
+    uint8_t note_on[3] = {0x90, 60, 112};
+    mono_t *voice = mono_create(&host, 1);
+    assert(voice);
+    mono_on_midi(voice, note_on, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(render_energy(voice, 4) > 1000);
+    char debug[64];
+    get_string(voice, "debug", debug, sizeof(debug));
+    assert(!strncmp(debug, "1:", 2));
+    mono_destroy(voice);
+
+    mono_t *full = mono_create(&host, 6);
+    assert(full);
+    uint8_t performance_pad[3] = {0x90, 68, 112};
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(render_energy(full, 4) > 1000);
+    mono_destroy(full);
+
+    full = mono_create(&host, 6);
+    assert(full);
+    uint8_t control_pad[3] = {0x90, 92, 112};
+    mono_on_midi(full, control_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(render_energy(full, 4) == 0);
+    mono_destroy(full);
+}
+
+static void test_remote_state_contract(void) {
+    mono_t *m = mono_create(&host, 6);
+    assert(m);
+    mono_set_param(m, "track", "2");
+    mono_set_param(m, "page", "3");
+    mono_set_param(m, "p4", "99");
+    mono_set_param(m, "toggle_step", "0");
+
+    char state[1024], poll[128];
+    get_string(m, "state", state, sizeof(state));
+    get_string(m, "rui_poll", poll, sizeof(poll));
+    assert(strstr(state, "\"track\":2"));
+    assert(strstr(state, "\"page\":3"));
+    assert(strstr(state, "\"p4\":99"));
+    assert(strstr(state, "\"steps\":\"1,"));
+    assert(strchr(poll, ':'));
+    mono_destroy(m);
+}
+
 int main(void) {
     test_all_machines_sound_distinct();
     test_note_release();
@@ -165,6 +214,8 @@ int main(void) {
     test_internal_clock();
     test_clock_loss_falls_back();
     test_six_tracks_render_together();
+    test_production_event_paths();
+    test_remote_state_contract();
     puts("mono host simulator: all tests passed");
     return 0;
 }
