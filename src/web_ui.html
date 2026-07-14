@@ -114,6 +114,7 @@
 "use strict";
 const MACHINES = ["SW SAW","SW PULSE","SW ENS","SID 6581","DIGIPRO","FM+STAT"];
 const PAGES = ["SYNTH","AMP","FILTER","EFFECT","LFO 1","LFO 2","LFO 3"];
+const LFO_DESTS = ["OFF","PITCH","FILTER BASE","FILTER WIDTH","VOLUME","PAN","DELAY"];
 const COMMON = [null,
   ["ATK","HOLD","DEC","REL","DIST","VOL","PAN","PORT"],
   ["BASE","WIDTH","HP Q","LP Q","F ATK","F DEC","F BASE","F WIDTH"],
@@ -138,6 +139,9 @@ const held = new Set();
 const el = id => document.getElementById(id);
 const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[key]);
 const labels = () => number("page") === 0 ? SYNTH[number("machine")] : COMMON[number("page")];
+const isLfoDestination = i => number("page") >= 4 && i === 0;
+const destinationIndex = value => Math.max(0,Math.min(6,Math.floor(Number(value)/16)));
+const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)] : String(value).padStart(3,"0");
 function send(key, value) {
   if (!PREFIX) return;
   M[key] = String(value);
@@ -154,7 +158,7 @@ for (let i=0;i<8;i++) {
   box.innerHTML=`<label id="label${i}">P${i+1}</label><input id="p${i+1}" type="range" min="0" max="127"><output class="value" id="value${i}">000</output>`;
   el("controls").appendChild(box);
   const slider=el(`p${i+1}`);
-  slider.oninput=()=>{touched[`p${i+1}`]=Date.now(); el(`value${i}`).value=String(slider.value).padStart(3,"0"); send(`p${i+1}`,slider.value);};
+  slider.oninput=()=>{touched[`p${i+1}`]=Date.now(); el(`value${i}`).value=displayValue(i,slider.value); send(`p${i+1}`,slider.value);};
 }
 for (let i=0;i<16;i++) {
   const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
@@ -191,7 +195,7 @@ function render() {
   [...el("tracks").children].forEach((b,i)=>b.classList.toggle("active",i===track));
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
-  const names=labels(); for(let i=0;i<8;i++){el(`label${i}`).textContent=names[i]; syncRange(`p${i+1}`,number(`p${i+1}`),`value${i}`);}
+  const names=labels(); for(let i=0;i<8;i++){const slider=el(`p${i+1}`),dest=isLfoDestination(i);slider.max=dest?96:127;slider.step=dest?16:1;el(`label${i}`).textContent=names[i];syncRange(`p${i+1}`,number(`p${i+1}`),`value${i}`);el(`value${i}`).value=displayValue(i,number(`p${i+1}`));}
   syncRange("master",number("master",100),"masterValue");
   const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});

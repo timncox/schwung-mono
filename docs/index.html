@@ -736,6 +736,7 @@
       <a href="#start">Start</a>
       <a href="#surface">Surface</a>
       <a href="#locks">Locks</a>
+      <a href="#save">Save</a>
       <a href="#pages">Pages</a>
       <a href="#machines">Machines</a>
       <a href="#reference">Reference</a>
@@ -893,9 +894,21 @@
     </div>
   </section>
 
+  <section id="save">
+    <div class="wrap">
+      <div class="section-head"><div class="index">04 / Save</div><h2 class="section-title">Keep the sound. Keep the sequence.</h2></div>
+      <p class="lede">Choose the save that matches where the sequence lives. Mono presets and Move Sets preserve different layers of the instrument.</p>
+      <div class="lock-workflow">
+        <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine and every sound parameter.</p></div>
+        <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips as well as the track state.</p></div>
+        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, and parameter locks return.</p></div>
+      </div>
+    </div>
+  </section>
+
   <section id="pages">
     <div class="wrap">
-      <div class="section-head"><div class="index">04 / Pages</div><h2 class="section-title">Eight knobs. Seven views. No menu maze.</h2></div>
+      <div class="section-head"><div class="index">05 / Pages</div><h2 class="section-title">Eight knobs. Seven views. No menu maze.</h2></div>
       <p class="lede">Use this live panel to see every label exactly as it appears on Move. Change machine or page; move the sliders to update the mock display.</p>
 
       <div class="editor">
@@ -918,12 +931,13 @@
           </div>
         </div>
       </div>
+      <div class="warning"><b>LFO destination</b><span>The first encoder on each LFO page now shows its target by name: Off, Pitch, Filter Base, Filter Width, Volume, Pan, or Delay. Each detent moves to the next destination.</span></div>
     </div>
   </section>
 
   <section id="machines">
     <div class="wrap">
-      <div class="section-head"><div class="index">05 / Machines</div><h2 class="section-title">Six starting points. Six different instincts.</h2></div>
+      <div class="section-head"><div class="index">06 / Machines</div><h2 class="section-title">Six starting points. Six different instincts.</h2></div>
       <div class="machines">
         <article class="machine-card">
           <div class="machine-code"><span>M–01</span><span>SUPERWAVE</span></div>
@@ -967,7 +981,7 @@
 
   <section id="reference">
     <div class="wrap">
-      <div class="section-head"><div class="index">06 / Reference</div><h2 class="section-title">Everything worth remembering.</h2></div>
+      <div class="section-head"><div class="index">07 / Reference</div><h2 class="section-title">Everything worth remembering.</h2></div>
       <div class="reference-grid">
         <div class="ref-panel">
           <h3>Mono / full surface</h3>
@@ -992,13 +1006,13 @@
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>
       </div>
-      <div class="warning"><b>Version 0.1 boundary</b><span>Patterns in the full-surface build are not yet persistent across a module restart. VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
+      <div class="warning"><b>Version 0.1 boundary</b><span>VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
     </div>
   </section>
 
   <section id="install">
     <div class="wrap">
-      <div class="section-head"><div class="index">07 / Install</div><h2 class="section-title">Two modules. One archive each.</h2></div>
+      <div class="section-head"><div class="index">08 / Install</div><h2 class="section-title">Two modules. One archive each.</h2></div>
       <div class="install-grid">
         <div class="install-card">
           <h3>Already on Tim's Move.</h3>
@@ -1052,7 +1066,9 @@
 
   let currentPage = 0;
   let currentMachine = 0;
-  const values = Array.from({ length: 7 }, (_, p) => Array.from({ length: 8 }, (_, i) => p === 0 ? [76,18,32,0,0,0,0,64][i] : 64));
+  const LFO_DESTS = ['OFF','PITCH','FILTER BASE','FILTER WIDTH','VOLUME','PAN','DELAY'];
+  const values = Array.from({ length: 7 }, (_, p) => Array.from({ length: 8 }, (_, i) =>
+    p === 0 ? [76,18,32,0,0,0,0,64][i] : (p >= 4 && i === 0 ? 0 : 64)));
 
   document.querySelectorAll('.mode-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1154,6 +1170,10 @@
   });
 
   function activeParams() { return currentPage === 0 ? MACHINES[currentMachine].params : PAGES[currentPage].params; }
+  function isEditorLfoDestination(i) { return currentPage >= 4 && i === 0; }
+  function editorValue(i, value) {
+    return isEditorLfoDestination(i) ? LFO_DESTS[Math.max(0, Math.min(6, Math.floor(value / 16)))] : String(value).padStart(3,'0');
+  }
   function renderEditor() {
     document.querySelectorAll('.page-button').forEach((b, i) => b.classList.toggle('active', i === currentPage));
     document.querySelectorAll('.machine-button').forEach((b, i) => b.classList.toggle('active', i === currentMachine));
@@ -1169,7 +1189,7 @@
       const value = values[currentPage][i];
       const cell = document.createElement('div');
       cell.className = 'param-cell';
-      cell.innerHTML = `<b>${name}</b><span data-value="${i}">${String(value).padStart(3,'0')}</span>`;
+      cell.innerHTML = `<b>${name}</b><span data-value="${i}">${editorValue(i, value)}</span>`;
       readout.appendChild(cell);
 
       const wrap = document.createElement('div');
@@ -1180,13 +1200,14 @@
       const input = document.createElement('input');
       input.type = 'range';
       input.min = '0';
-      input.max = '127';
+      input.max = isEditorLfoDestination(i) ? '96' : '127';
+      input.step = isEditorLfoDestination(i) ? '16' : '1';
       input.value = String(value);
       input.id = `param-${i}`;
       input.disabled = name === '–';
       input.addEventListener('input', () => {
         values[currentPage][i] = Number(input.value);
-        readout.querySelector(`[data-value="${i}"]`).textContent = input.value.padStart(3,'0');
+        readout.querySelector(`[data-value="${i}"]`).textContent = editorValue(i, Number(input.value));
       });
       wrap.append(label, input);
       controls.appendChild(wrap);

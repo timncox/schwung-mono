@@ -29,6 +29,22 @@ Every track also has an AHDR envelope, dual-cutoff resonant filter,
 distortion, EQ, sample-rate reduction, stereo filtered delay, portamento,
 pan, and three assignable LFOs.
 
+LFO destination is a named seven-choice control: Off, Pitch, Filter Base,
+Filter Width, Volume, Pan, or Delay.
+
+## Saving and recall
+
+- **Mono Voice sound preset:** in Schwung's Chain Editor, highlight the synth
+  block, hold Shift and click the jog wheel, open **User Presets**, then choose
+  **Save current**.
+- **Mono Voice sound plus Move sequence:** save the Move Set. Move's native
+  clips belong to the Set, not to a component preset. Open Set Overview with
+  Shift + Step 1; Move saves Sets automatically.
+- **Mono six-track pattern:** inside the full-surface build, hold Shift and
+  click the jog wheel. **Save current** captures all six sounds, all 64 steps,
+  and every parameter lock; choosing a saved name recalls it without starting
+  transport automatically.
+
 ## Build and test
 
 ```sh
@@ -77,6 +93,6 @@ calibration against reference hardware is future work.
 This first vertical slice proves the module architecture and is ready for a
 hardware smoke test. It does not yet include VO-6, BeatBox, DigiPRO user-wave
 loading, FM+ Parallel/Dynamic, FX machines/neighbor routing, arpeggiators,
-song mode, or persistent overtake patterns. The current factory-independent
-algorithms also need A/B calibration against a reference Monomachine before
-they should be described as sonically faithful.
+or song mode. The current factory-independent algorithms also need A/B
+calibration against a reference Monomachine before they should be described
+as sonically faithful.

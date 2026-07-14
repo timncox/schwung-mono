@@ -2,7 +2,7 @@
   "id": "mono-voice",
   "name": "Mono Voice",
   "abbrev": "MONV",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Monomachine-inspired digital machine voice: SuperWave, SID, DigiPRO and FM",
   "dsp": "dsp.so",
   "ui_chain": "ui_chain.js",
@@ -89,7 +89,7 @@
         "lfo1": {
           "name":"LFO 1",
           "params":[
-            {"key":"lfo1_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo1_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
             {"key":"lfo1_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo1_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo1_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
@@ -103,7 +103,7 @@
         "lfo2": {
           "name":"LFO 2",
           "params":[
-            {"key":"lfo2_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo2_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
             {"key":"lfo2_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo2_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo2_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
@@ -117,7 +117,7 @@
         "lfo3": {
           "name":"LFO 3",
           "params":[
-            {"key":"lfo3_1","name":"Destination","type":"int","min":0,"max":127,"default":0},
+            {"key":"lfo3_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
             {"key":"lfo3_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo3_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo3_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},

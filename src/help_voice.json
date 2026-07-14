@@ -39,7 +39,21 @@
         "track. LFO 1-3",
         "modulate pitch,",
         "filter, volume,",
-        "pan or delay."
+        "pan or delay.",
+        "DEST shows the",
+        "target by name."
+      ]
+    },
+    {
+      "title": "Saving",
+      "lines": [
+        "Use Schwung User",
+        "Presets for sound.",
+        "",
+        "Move sequences live",
+        "in the Move Set.",
+        "Shift + Step 1",
+        "opens Set Overview."
       ]
     }
   ]

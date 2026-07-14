@@ -1,6 +1,7 @@
 /* Mono — six-track machine synth and lock sequencer, full-surface UI. */
+import * as os from 'os';
 import {
-    MoveKnob1, MoveShift, MoveMainKnob, MoveLeft, MoveRight,
+    MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
@@ -9,10 +10,12 @@ import { drawMenuHeader as drawHeader, drawMenuFooter as drawFooter }
     from '/data/UserData/schwung/shared/menu_layout.mjs';
 import { announce, announceParameter, announceView }
     from '/data/UserData/schwung/shared/screen_reader.mjs';
+import { openTextEntry } from '/data/UserData/schwung/shared/text_entry.mjs';
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
 const MACHINE_COLORS = [OrangeRed, BrightRed, YellowGreen, Purple, Cyan, Blue];
 const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3'];
+const LFO_DESTS = ['OFF', 'PITCH', 'FBASE', 'FWID', 'VOL', 'PAN', 'DELAY'];
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -34,6 +37,8 @@ const SYNTH = [
 const TRACK_PADS = [92, 93, 94, 95, 96, 97];
 const PAD_MACHINE = 98, PAD_TRANSPORT = 99;
 const STEP_FIRST = 16, STEP_COUNT = 16;
+const PRESET_DIR = '/data/UserData/schwung/presets/mono';
+const SAVE_ROW = '[Save current...]';
 
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let patternLen = 16, playStep = -1, shift = false, tickCount = 0;
@@ -41,17 +46,119 @@ let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
 let focusBank = 0;
+let presetMode = false, presetIndex = 0, presets = [];
 
 function gp(key) {
     const v = host_module_get_param(key);
     return v === null || v === undefined ? null : String(v);
 }
+
+function safePresetStem(name) {
+    return name.replace(/[\/\\\x00-\x1f]/g, '').trim() || 'Mono Pattern';
+}
+
+function loadPresetList() {
+    let files = [];
+    try { files = os.readdir(PRESET_DIR) || []; } catch (e) { files = []; }
+    presets = files.filter(file => /\.json$/i.test(file)).map(file => {
+        let name = file.replace(/\.json$/i, '');
+        try {
+            const parsed = JSON.parse(host_read_file(`${PRESET_DIR}/${file}`) || '{}');
+            if (parsed.name) name = String(parsed.name);
+        } catch (e) {}
+        return {name, file};
+    }).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
+function uniquePresetName(rawName) {
+    const base = rawName.trim() || 'Mono Pattern';
+    const used = new Set(presets.map(p => p.name.toLowerCase()));
+    if (!used.has(base.toLowerCase())) return base;
+    let suffix = 2;
+    while (used.has(`${base} ${suffix}`.toLowerCase())) suffix++;
+    return `${base} ${suffix}`;
+}
+
+function openPresetBrowser() {
+    loadPresetList();
+    presetIndex = 0;
+    presetMode = true;
+    needsRedraw = true;
+    announce(`Mono presets, ${presets.length} saved`);
+}
+
+function closePresetBrowser() {
+    presetMode = false;
+    needsRedraw = true;
+    announceView('Mono');
+}
+
+function saveCurrentPreset(rawName) {
+    const stateJson = gp('state');
+    if (!stateJson) { announce('Preset save failed'); return; }
+    if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
+    else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
+    const name = uniquePresetName(rawName);
+    const stem = safePresetStem(name);
+    let state;
+    try { state = JSON.parse(stateJson); } catch (e) { state = stateJson; }
+    const payload = JSON.stringify({name, module: 'mono', version: 1, state});
+    const ok = typeof host_write_file === 'function'
+        && host_write_file(`${PRESET_DIR}/${stem}.json`, payload);
+    if (!ok) { announce('Preset save failed'); return; }
+    loadPresetList();
+    const found = presets.findIndex(p => p.name === name);
+    presetIndex = found >= 0 ? found + 1 : 0;
+    needsRedraw = true;
+    announce(`Saved ${name}`);
+}
+
+function startPresetSave() {
+    openTextEntry({
+        title: '',
+        initialText: 'Mono Pattern',
+        onAnnounce: announce,
+        onConfirm: name => saveCurrentPreset(name || 'Mono Pattern'),
+        onCancel: () => { needsRedraw = true; announce('Save cancelled'); }
+    });
+}
+
+function loadSelectedPreset() {
+    const entry = presets[presetIndex - 1];
+    if (!entry || typeof host_read_file !== 'function') return;
+    let stateJson = null;
+    try {
+        const payload = JSON.parse(host_read_file(`${PRESET_DIR}/${entry.file}`) || '{}');
+        stateJson = typeof payload.state === 'string'
+            ? payload.state : JSON.stringify(payload.state);
+    } catch (e) {}
+    if (!stateJson) { announce('Preset load failed'); return; }
+    if (typeof host_module_set_param_blocking === 'function')
+        host_module_set_param_blocking('state', stateJson, 1000);
+    else
+        host_module_set_param('state', stateJson);
+    track = Math.max(0, Math.min(5, parseInt(gp('track') || '0', 10)));
+    page = Math.max(0, Math.min(6, parseInt(gp('page') || '0', 10)));
+    stepPage = Math.max(0, Math.min(3, parseInt(gp('step_page') || '0', 10)));
+    fetchAll();
+    presetMode = false;
+    paintAll(true);
+    needsRedraw = true;
+    announce(`Loaded ${entry.name}`);
+}
+
 function shiftActive() {
     if (typeof shadow_get_shift_held === 'function' && shadow_get_shift_held() !== 0)
         return true;
     return shift;
 }
 function names() { return page === 0 ? SYNTH[machine] : COMMON[page]; }
+function isLfoDestination(i) { return page >= 4 && i === 0; }
+function destinationIndex(value) { return Math.max(0, Math.min(6, Math.floor(value / 16))); }
+function displayValue(i, value) {
+    return isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
+        : `${value}`.padStart(3, '0');
+}
 
 function parseSteps() {
     const s = (gp('steps') || '').split(',');
@@ -102,7 +209,9 @@ function cycleMachine(delta) {
 
 function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
-    let v = Math.max(0, Math.min(127, values[i] + delta));
+    let v = isLfoDestination(i)
+        ? Math.max(0, Math.min(6, destinationIndex(values[i]) + delta)) * 16
+        : Math.max(0, Math.min(127, values[i] + delta));
     if (v === values[i]) return;
     values[i] = v;
     if (heldStep) {
@@ -116,7 +225,7 @@ function adjust(i, delta) {
     } else {
         host_module_set_param(`p${i + 1}`, `${v}`);
     }
-    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : `${v}`);
+    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : displayValue(i, v));
     needsRedraw = true;
 }
 
@@ -159,11 +268,27 @@ function draw() {
         const i = first + column;
         const x = column * 32 + 2;
         print(x, 18, n[i], 1);
-        print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
+        print(x, 34, displayValue(i, values[i]), 1);
     }
     drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
                 right: heldStep ? (shiftActive() ? 'turn=unlock' : 'turn=lock')
                     : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
+    needsRedraw = false;
+}
+
+function drawPresetBrowser() {
+    clear_screen();
+    drawHeader('MONO · PATTERN PRESETS');
+    const rows = [SAVE_ROW, ...presets.map(p => p.name)];
+    const first = Math.max(0, Math.min(Math.max(0, rows.length - 3), presetIndex - 1));
+    for (let row = 0; row < 3 && first + row < rows.length; row++) {
+        const index = first + row, y = 19 + row * 11;
+        const selected = index === presetIndex;
+        if (selected) fill_rect(0, y - 2, 128, 10, 1);
+        const label = `${selected ? '> ' : '  '}${rows[index]}`.slice(0, 20);
+        print(3, y, label, selected ? 0 : 1);
+    }
+    drawFooter({left: 'Back', right: 'Click: save/load'});
     needsRedraw = false;
 }
 
@@ -192,13 +317,35 @@ globalThis.tick = function() {
         needsRedraw = true;
     }
     if (resumePaints > 0 && tickCount % 8 === 0) { paintAll(true); resumePaints--; }
-    if (needsRedraw) draw();
+    if (needsRedraw) presetMode ? drawPresetBrowser() : draw();
 };
 
 globalThis.onMidiMessageInternal = function(data) {
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
+        if (presetMode) {
+            if (d1 === MoveMainKnob) {
+                const d = decodeDelta(d2);
+                if (d) {
+                    presetIndex = Math.max(0, Math.min(presets.length, presetIndex + d));
+                    const label = presetIndex === 0 ? SAVE_ROW : presets[presetIndex - 1].name;
+                    announce(`Preset, ${label}`);
+                    needsRedraw = true;
+                }
+                return;
+            }
+            if (d1 === MoveMainButton && d2 > 0) {
+                presetIndex === 0 ? startPresetSave() : loadSelectedPreset();
+                return;
+            }
+            if (d1 === MoveBack && d2 > 0) { closePresetBrowser(); return; }
+            return;
+        }
+        if (d1 === MoveMainButton && d2 > 0 && shiftActive()) {
+            openPresetBrowser();
+            return;
+        }
         if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setPage(page + d); return; }
         if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
         if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
@@ -207,6 +354,8 @@ globalThis.onMidiMessageInternal = function(data) {
         }
         return;
     }
+
+    if (presetMode) return;
 
     const release = status === 0x80 || (status === 0x90 && d2 === 0);
     if (release) {

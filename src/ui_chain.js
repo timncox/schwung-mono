@@ -10,6 +10,7 @@ import { announce, announceParameter, announceView }
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
 const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3'];
+const LFO_DESTS = ['OFF', 'PITCH', 'FBASE', 'FWID', 'VOL', 'PAN', 'DELAY'];
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -44,6 +45,12 @@ function shiftActive() {
 }
 
 function names() { return page === 0 ? SYNTH[machine] : COMMON[page]; }
+function isLfoDestination(i) { return page >= 4 && i === 0; }
+function destinationIndex(value) { return Math.max(0, Math.min(6, Math.floor(value / 16))); }
+function displayValue(i, value) {
+    return isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
+        : `${value}`.padStart(3, '0');
+}
 
 function fetchAll() {
     const mv = gp('machine');
@@ -73,11 +80,13 @@ function setMachine(next) {
 
 function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
-    const v = Math.max(0, Math.min(127, values[i] + delta));
+    const v = isLfoDestination(i)
+        ? Math.max(0, Math.min(6, destinationIndex(values[i]) + delta)) * 16
+        : Math.max(0, Math.min(127, values[i] + delta));
     if (v === values[i]) return;
     values[i] = v;
     host_module_set_param(`p${i + 1}`, `${v}`);
-    announceParameter(names()[i], `${v}`);
+    announceParameter(names()[i], displayValue(i, v));
     needsRedraw = true;
 }
 
@@ -90,7 +99,7 @@ function draw() {
         const i = first + column;
         const x = column * 32 + 2;
         print(x, 18, n[i], 1);
-        print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
+        print(x, 34, displayValue(i, values[i]), 1);
     }
     drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
                 right: shiftActive() ? 'jog=machine' : 'jog=page'});

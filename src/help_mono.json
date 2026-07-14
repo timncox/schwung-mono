@@ -61,7 +61,22 @@
         "SYNTH, AMP, FILTER,",
         "EFFECT and LFO",
         "pages. Each page",
-        "maps to knobs 1-8."
+        "maps to knobs 1-8.",
+        "",
+        "LFO DEST shows its",
+        "target by name."
+      ]
+    },
+    {
+      "title": "Presets",
+      "lines": [
+        "Hold Shift and",
+        "click the jog to",
+        "open presets.",
+        "",
+        "Save current keeps",
+        "all 6 sounds, 64",
+        "steps and locks."
       ]
     }
   ]

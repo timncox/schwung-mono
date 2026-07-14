@@ -121,6 +121,12 @@ static void test_parameter_aliases(void) {
     assert(get_int(m, "syn3") == 99);
     mono_set_param(m, "machine", "4");
     assert(get_int(m, "machine") == 4);
+    mono_set_param(m, "lfo1_1", "3");
+    assert(get_int(m, "lfo1_1") == 3);
+    mono_set_param(m, "page", "4");
+    assert(get_int(m, "p1") == 48);
+    mono_set_param(m, "p1", "96");
+    assert(get_int(m, "lfo1_1") == 6);
     mono_destroy(m);
 }
 
@@ -223,7 +229,7 @@ static void test_remote_state_contract(void) {
     mono_set_param(m, "p4", "99");
     mono_set_param(m, "toggle_step", "0");
 
-    char state[1024], poll[128];
+    char state[16384], poll[128];
     get_string(m, "state", state, sizeof(state));
     get_string(m, "rui_poll", poll, sizeof(poll));
     assert(strstr(state, "\"track\":2"));
@@ -231,6 +237,116 @@ static void test_remote_state_contract(void) {
     assert(strstr(state, "\"p4\":99"));
     assert(strstr(state, "\"steps\":\"1,"));
     assert(strchr(poll, ':'));
+    mono_destroy(m);
+}
+
+static void test_full_state_round_trip(void) {
+    mono_t *source = mono_create(&host, 6);
+    mono_t *restored = mono_create(&host, 6);
+    assert(source && restored);
+
+    mono_set_param(source, "pattern_len", "64");
+    mono_set_param(source, "master", "137");
+    mono_set_param(source, "bpm_override", "123.5");
+    mono_set_param(source, "track", "0");
+    mono_set_param(source, "machine", "2");
+    mono_set_param(source, "syn1", "17");
+    mono_set_param(source, "set_step", "0:48:101:77:15");
+    mono_set_param(source, "lock", "0:0:0:99");
+    mono_set_param(source, "lock", "0:0:32:48");
+    mono_set_param(source, "track", "4");
+    mono_set_param(source, "machine", "5");
+    mono_set_param(source, "page", "6");
+    mono_set_param(source, "p8", "111");
+    mono_set_param(source, "set_step", "63:72:127:64:9");
+    mono_set_param(source, "lock", "4:63:55:33");
+    mono_set_param(source, "step_page", "3");
+    mono_set_param(source, "transport", "1");
+
+    char state[16384], recalled[16384];
+    int state_len = mono_get_param(source, "state", state, sizeof(state));
+    assert(state_len > 0 && state_len < (int)sizeof(state));
+    assert(strstr(state, "\"v\":2"));
+    assert(strstr(state, "\"data\":\"T0"));
+
+    mono_set_param(restored, "transport", "1");
+    mono_set_param(restored, "state", state);
+    assert(get_int(restored, "transport") == 0); /* recall never auto-starts */
+    assert(get_int(restored, "track") == 4);
+    assert(get_int(restored, "page") == 6);
+    assert(get_int(restored, "step_page") == 3);
+    assert(get_int(restored, "pattern_len") == 64);
+    assert(get_int(restored, "master") == 137);
+    assert(get_int(restored, "machine") == 5);
+    assert(get_int(restored, "p8") == 111);
+    char steps[128];
+    get_string(restored, "steps", steps, sizeof(steps));
+    assert(steps[strlen(steps) - 1] == '2');
+
+    mono_set_param(restored, "track", "0");
+    mono_set_param(restored, "page", "0");
+    mono_set_param(restored, "step_page", "0");
+    assert(get_int(restored, "machine") == 2);
+    assert(get_int(restored, "syn1") == 17);
+    get_string(restored, "steps", steps, sizeof(steps));
+    assert(!strncmp(steps, "2,", 2));
+
+    /* Restore the saved UI selection before comparing canonical snapshots. */
+    mono_set_param(restored, "track", "4");
+    mono_set_param(restored, "page", "6");
+    mono_set_param(restored, "step_page", "3");
+    int recalled_len = mono_get_param(restored, "state", recalled, sizeof(recalled));
+    assert(recalled_len == state_len);
+    assert(!strcmp(recalled, state));
+
+    mono_set_param(restored, "state", "{\"v\":2,\"data\":\"T0BAD\"}");
+    assert(get_int(restored, "machine") == 5); /* malformed snapshots are ignored */
+    mono_destroy(source);
+    mono_destroy(restored);
+}
+
+static void test_dense_pattern_fits_host_state_limit(void) {
+    mono_t *m = mono_create(&host, 6);
+    assert(m);
+    for (int tr = 0; tr < 6; ++tr) {
+        char value[64];
+        snprintf(value, sizeof(value), "%d", tr);
+        mono_set_param(m, "track", value);
+        for (int step = 0; step < MONO_STEPS; ++step) {
+            snprintf(value, sizeof(value), "%d:%d:100:100:15", step,
+                     36 + (step % 36));
+            mono_set_param(m, "set_step", value);
+        }
+    }
+    char state[16384];
+    int state_len = mono_get_param(m, "state", state, sizeof(state));
+    assert(state_len > 0 && state_len < (int)sizeof(state));
+    mono_destroy(m);
+}
+
+static void test_maximum_lock_state_fits_overtake_channel(void) {
+    mono_t *m = mono_create(&host, 6);
+    assert(m);
+    char value[64];
+    for (int tr = 0; tr < 6; ++tr) {
+        snprintf(value, sizeof(value), "%d", tr);
+        mono_set_param(m, "track", value);
+        for (int step = 0; step < MONO_STEPS; ++step) {
+            snprintf(value, sizeof(value), "%d:%d:100:100:15", step,
+                     36 + (step % 36));
+            mono_set_param(m, "set_step", value);
+            for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+                snprintf(value, sizeof(value), "%d:%d:%d:%d", tr, step, pid,
+                         (tr * 17 + step * 3 + pid) & 127);
+                mono_set_param(m, "lock", value);
+            }
+        }
+    }
+    char *state = malloc(65536);
+    assert(state);
+    int state_len = mono_get_param(m, "state", state, 65536);
+    assert(state_len > 0 && state_len < 65536);
+    free(state);
     mono_destroy(m);
 }
 
@@ -245,6 +361,9 @@ int main(void) {
     test_six_tracks_render_together();
     test_production_event_paths();
     test_remote_state_contract();
+    test_full_state_round_trip();
+    test_dense_pattern_fits_host_state_limit();
+    test_maximum_lock_state_fits_overtake_channel();
     puts("mono host simulator: all tests passed");
     return 0;
 }
