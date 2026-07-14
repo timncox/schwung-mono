@@ -10,6 +10,12 @@ It ships in two forms:
 - **Mono** (`mono`) — a full-surface six-track instrument with an internal
   64-step sequencer and per-step parameter locks.
 
+## Operation manual
+
+Open the self-contained [interactive Mono manual](docs/index.html) for the
+quick start, full Move control map, parameter-lock workflow, seven-page editor,
+and machine reference.
+
 ## Current machines
 
 - SuperWave Saw
