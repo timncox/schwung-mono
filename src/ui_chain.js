@@ -28,9 +28,18 @@ const SYNTH = [
     ['WAVE','WP','WPM','WPRS','SYNC','SFRQ','-','TUNE'],
     ['1FRQ','1FIN','1FB','1ENV','2FRQ','2VOL','TONE','TUNE']
 ];
+const SYNTH_SHIFT = [
+    ['BRITE','STACK','SUBPW','SUBO','DRIFT','FOLD','BITS','NOISE'],
+    ['ASYM','STACK','SUB','SYNC','DRIFT','FOLD','BITS','NOISE'],
+    ['LEV1','LEV2','LEV3','LEV4','DRIFT','FOLD','BITS','NOISE'],
+    ['RING','SUB','MODMX','CHAOS','DRIFT','FOLD','BITS','NOISE'],
+    ['WAVE2','BLEND','DETUN','OCT','DRIFT','FOLD','BITS','NOISE'],
+    ['2FINE','2FB','3FRQ','3LVL','DRIFT','FOLD','BITS','NOISE']
+];
 
 let page = 0, machine = 0, shift = false, shiftVisual = false;
 let values = new Array(8).fill(0);
+let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
 
 function gp(key) {
@@ -44,7 +53,9 @@ function shiftActive() {
     return shift;
 }
 
-function names() { return page === 0 ? SYNTH[machine] : COMMON[page]; }
+function shiftLayer() { return page === 0 && shiftActive(); }
+function names() { return page === 0 ? (shiftLayer() ? SYNTH_SHIFT[machine] : SYNTH[machine]) : COMMON[page]; }
+function activeValues() { return shiftLayer() ? altValues : values; }
 function isLfoDestination(i) { return page >= 4 && i === 0; }
 function destinationIndex(value) { return Math.max(0, Math.min(6, Math.floor(value / 16))); }
 function displayValue(i, value) {
@@ -58,6 +69,7 @@ function fetchAll() {
     machine = Math.max(0, Math.min(MACHINES.length - 1, parseInt(mv, 10) || 0));
     host_module_set_param('page', `${page}`);
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
+    for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
     return true;
 }
 
@@ -80,12 +92,13 @@ function setMachine(next) {
 
 function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
+    const target = activeValues();
     const v = isLfoDestination(i)
-        ? Math.max(0, Math.min(6, destinationIndex(values[i]) + delta)) * 16
-        : Math.max(0, Math.min(127, values[i] + delta));
-    if (v === values[i]) return;
-    values[i] = v;
-    host_module_set_param(`p${i + 1}`, `${v}`);
+        ? Math.max(0, Math.min(6, destinationIndex(target[i]) + delta)) * 16
+        : Math.max(0, Math.min(127, target[i] + delta));
+    if (v === target[i]) return;
+    target[i] = v;
+    host_module_set_param(shiftLayer() ? `alt${i + 1}` : `p${i + 1}`, `${v}`);
     announceParameter(names()[i], displayValue(i, v));
     needsRedraw = true;
 }
@@ -94,14 +107,15 @@ function draw() {
     clear_screen();
     drawHeader(`MONO V · ${MACHINES[machine]}`);
     const n = names();
+    const shown = activeValues();
     const first = focusBank * 4;
     for (let column = 0; column < 4; column++) {
         const i = first + column;
         const x = column * 32 + 2;
         print(x, 18, n[i], 1);
-        print(x, 34, displayValue(i, values[i]), 1);
+        print(x, 34, displayValue(i, shown[i]), 1);
     }
-    drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
+    drawFooter({left: `${shiftLayer() ? 'SHIFT SYN' : PAGES[page]} K${first + 1}-${first + 4}`,
                 right: shiftActive() ? 'jog=machine' : 'jog=page'});
     needsRedraw = false;
 }

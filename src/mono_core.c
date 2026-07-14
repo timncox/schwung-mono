@@ -72,6 +72,7 @@ typedef struct {
     float phase[10];
     float mod_phase[4];
     float fm_feedback;
+    float fm_feedback2;
     uint32_t noise;
 
     mono_env_t amp;
@@ -130,7 +131,7 @@ static void changed(mono_t *m) {
 }
 
 static int is_lfo_destination_param(int pid) {
-    return pid >= 32 && pid < MONO_PARAMS && ((pid - 32) % 8) == 0;
+    return pid >= 32 && pid < MONO_PRIMARY_PARAMS && ((pid - 32) % 8) == 0;
 }
 
 static int lfo_destination_index(int value) {
@@ -251,8 +252,17 @@ static void machine_defaults(mono_track_t *t, mono_machine_t machine) {
         { 0, 0, 0, 1, 0, 64, 0, 64 },
         { 34, 64, 10, 72, 46, 42, 72, 64 }
     };
+    static const uint8_t alt_defs[MONO_MACHINE_COUNT][MONO_ALT_PARAMS] = {
+        { 0, 21, 64, 0, 0, 0, 0, 0 },       /* BRITE STACK SUBPW SUBOCT */
+        { 64, 21, 0, 0, 0, 0, 0, 0 },       /* ASYM STACK SUB SYNC */
+        { 127, 127, 127, 127, 0, 0, 0, 0 }, /* per-voice levels */
+        { 0, 0, 0, 0, 0, 0, 0, 0 },         /* RING SUB MODMIX CHAOS */
+        { 0, 0, 64, 64, 0, 0, 0, 0 },       /* WAVE2 BLEND DETUNE OCTAVE */
+        { 64, 0, 34, 0, 0, 0, 0, 0 }        /* OP2FIN OP2FB OP3RAT OP3LVL */
+    };
     t->machine = machine;
     memcpy(t->base, defs[machine], 8);
+    memcpy(t->base + MONO_ALT_BASE, alt_defs[machine], MONO_ALT_PARAMS);
     memcpy(t->effective, t->base, MONO_PARAMS);
 }
 
@@ -458,10 +468,13 @@ void mono_note_off(mono_t *m, int track, int note) {
 
 static float osc_swavesaw(mono_t *m, mono_track_t *t, float freq) {
     const uint8_t *p = t->effective;
-    float width = 0.009f * pnorm(p[1]);
+    const uint8_t *a = t->effective + MONO_ALT_BASE;
+    float stack = fclamp(1.0f + ((int)a[1] - 21) * (2.0f / 106.0f), 0.6f, 3.0f);
+    float width = 0.009f * pnorm(p[1]) * stack;
     float ext = width * 2.0f;
     float v = saw(t->phase[0]);
     phase_step(&t->phase[0], freq, m->sample_rate);
+    v += sinf(4.0f * (float)M_PI * t->phase[0]) * pnorm(a[0]) * 0.45f;
     float ul = pnorm(p[0]);
     float ux = ul * pnorm(p[2]);
     const float ratios[4] = { 1.0f - width, 1.0f + width, 1.0f - ext, 1.0f + ext };
@@ -472,15 +485,22 @@ static float osc_swavesaw(mono_t *m, mono_track_t *t, float freq) {
     phase_step(&t->phase[5], freq * 0.5f, m->sample_rate);
     phase_step(&t->phase[6], freq * 0.5f, m->sample_rate);
     phase_step(&t->phase[7], freq * 0.25f, m->sample_rate);
-    v += pulse(t->phase[5], 0.5f) * pnorm(p[3]);
+    float sub_pw = fclamp(0.5f + ((int)a[2] - 64) * (0.9f / 127.0f), 0.05f, 0.95f);
+    v += pulse(t->phase[5], sub_pw) * pnorm(p[3]);
     v += sinf(2.0f * (float)M_PI * t->phase[6]) * pnorm(p[4]);
     v += sinf(2.0f * (float)M_PI * t->phase[7]) * pnorm(p[5]);
-    return v / (1.0f + 2.0f * ul + 2.0f * ux + pnorm(p[3]) + pnorm(p[4]) + pnorm(p[5]));
+    phase_step(&t->phase[8], freq * 0.125f, m->sample_rate);
+    float sub_oct = pnorm(a[3]);
+    v += sinf(2.0f * (float)M_PI * t->phase[8]) * sub_oct;
+    return v / (1.0f + 2.0f * ul + 2.0f * ux + pnorm(p[3]) +
+                pnorm(p[4]) + pnorm(p[5]) + sub_oct);
 }
 
 static float osc_swavepulse(mono_t *m, mono_track_t *t, float freq) {
     const uint8_t *p = t->effective;
-    float det = 0.009f * pnorm(p[1]);
+    const uint8_t *a = t->effective + MONO_ALT_BASE;
+    float stack = fclamp(1.0f + ((int)a[1] - 21) * (2.0f / 106.0f), 0.6f, 3.0f);
+    float det = 0.009f * pnorm(p[1]) * stack;
     float pw = fclamp(0.05f + 0.9f * pnorm(p[3]), 0.03f, 0.97f);
     float sweep = (pnorm(p[4]) - 0.5f) * 0.35f * sinf(2.0f * (float)M_PI * t->mod_phase[0]);
     phase_step(&t->mod_phase[0], 0.08f + 7.0f * pnorm(p[5]), m->sample_rate);
@@ -489,11 +509,21 @@ static float osc_swavepulse(mono_t *m, mono_track_t *t, float freq) {
     float ratios[5] = { 1, 1-det, 1+det, 1-2*det, 1+2*det };
     float levels[5] = { 1, pnorm(p[0]), pnorm(p[0]), pnorm(p[2]), pnorm(p[2]) };
     float sum = 0.0f;
+    if (a[3] && phase_step(&t->mod_phase[2], freq * (1.0f + 7.0f * pnorm(a[3])),
+                            m->sample_rate))
+        for (int i = 0; i < 5; ++i) t->phase[i] = 0.0f;
+    float asym = ((int)a[0] - 64) / 64.0f * 0.25f;
     for (int i = 0; i < 5; ++i) {
         phase_step(&t->phase[i], freq * ratios[i], m->sample_rate);
-        v += pulse(t->phase[i], pw) * levels[i];
+        float voice_pw = fclamp(pw + asym * (i * 0.25f), 0.03f, 0.97f);
+        v += pulse(t->phase[i], voice_pw) * levels[i];
         sum += levels[i];
     }
+    v += saw(t->phase[0]) * asym * sum * 0.35f;
+    float sub = pnorm(a[2]);
+    phase_step(&t->phase[5], freq * 0.5f, m->sample_rate);
+    v += pulse(t->phase[5], pw) * sub;
+    sum += sub;
     return v / fmaxf(sum, 1.0f);
 }
 
@@ -508,19 +538,23 @@ static float osc_ensemble(mono_t *m, mono_track_t *t, float freq) {
     float pw = fclamp(pnorm(p[5]), 0.05f, 0.95f);
     float chorus = 0.004f * pnorm(p[7]);
     float v = 0.0f;
+    float sum = 0.0f;
     for (int i = 0; i < 4; ++i) {
         float semi = i == 0 ? 0.0f : chord_offset(p[i - 1]);
         float r = powf(2.0f, semi / 12.0f) * (1.0f + chorus * (i - 1.5f));
         phase_step(&t->phase[i], freq * r, m->sample_rate);
         float a = saw(t->phase[i]);
         float b = pulse(t->phase[i], pw);
-        v += a + (b - a) * shape;
+        float level = pnorm(t->effective[MONO_ALT_BASE + i]);
+        v += (a + (b - a) * shape) * level;
+        sum += level;
     }
-    return v * 0.25f;
+    return v / fmaxf(sum, 1.0f);
 }
 
 static float osc_sid(mono_t *m, mono_track_t *t, float freq) {
     const uint8_t *p = t->effective;
+    const uint8_t *a = t->effective + MONO_ALT_BASE;
     float mod_ratio = 0.125f * powf(2.0f, pnorm(p[6]) * 6.0f);
     int mod_wrap = (int)phase_step(&t->mod_phase[0], freq * mod_ratio, m->sample_rate);
     int mode = (p[4] * 4) / 128;
@@ -540,7 +574,19 @@ static float osc_sid(mono_t *m, mono_track_t *t, float freq) {
     case 3: v = 0.5f * (saw(t->phase[0]) + pulse(t->phase[0], pw)); break;
     default: v = ((int32_t)t->noise) / 2147483648.0f; break;
     }
+    float mod = sinf(2.0f * (float)M_PI * t->mod_phase[0]);
     if (mode == 1 || mode == 3) v *= t->mod_phase[0] < 0.5f ? -1.0f : 1.0f;
+    float ring = pnorm(a[0]);
+    v += (v * mod - v) * ring;
+    float sub = pnorm(a[1]);
+    phase_step(&t->phase[1], freq * 0.5f, m->sample_rate);
+    v = (v + pulse(t->phase[1], 0.5f) * sub) / (1.0f + sub);
+    v += mod * pnorm(a[2]) * 0.5f;
+    if (a[3]) {
+        float chaos = ((int32_t)xrnd(&t->noise)) / 2147483648.0f;
+        float mix = pnorm(a[3]) * 0.45f;
+        v += (chaos - v) * mix;
+    }
     return roundf(v * 2047.0f) / 2047.0f;
 }
 
@@ -566,11 +612,20 @@ static float osc_digipro(mono_t *m, mono_track_t *t, float freq) {
     phase_step(&t->phase[0], freq, m->sample_rate);
     float a = table_read(m->wavetable[wave], t->phase[0]);
     float b = table_read(m->wavetable[next], t->phase[0]);
-    return a + (b - a) * morph;
+    float primary = a + (b - a) * morph;
+    int wave2 = (t->effective[MONO_ALT_BASE] * MONO_WAVES) / 128;
+    float detune = powf(2.0f, ((int)t->effective[MONO_ALT_BASE + 2] - 64) /
+                                      (64.0f * 12.0f));
+    int octave = (int)lrintf(((int)t->effective[MONO_ALT_BASE + 3] - 64) / 32.0f);
+    phase_step(&t->phase[1], freq * detune * powf(2.0f, (float)octave), m->sample_rate);
+    float secondary = table_read(m->wavetable[wave2], t->phase[1]);
+    float blend = pnorm(t->effective[MONO_ALT_BASE + 1]);
+    return primary + (secondary - primary) * blend;
 }
 
 static float osc_fm(mono_t *m, mono_track_t *t, float freq) {
     const uint8_t *p = t->effective;
+    const uint8_t *a = t->effective + MONO_ALT_BASE;
     static const float ratios[16] = {
         0.25f, 0.3333f, 0.5f, 0.6667f, 0.75f, 1, 1.25f, 1.5f,
         2, 2.5f, 3, 4, 5, 6, 8, 12
@@ -579,28 +634,56 @@ static float osc_fm(mono_t *m, mono_track_t *t, float freq) {
     int r2 = (p[4] * 16) / 128;
     float fine = powf(2.0f, ((int)p[1] - 64) / (64.0f * 12.0f));
     phase_step(&t->mod_phase[0], freq * ratios[r1] * fine, m->sample_rate);
-    phase_step(&t->mod_phase[1], freq * ratios[r2], m->sample_rate);
+    float fine2 = powf(2.0f, ((int)a[0] - 64) / (64.0f * 12.0f));
+    phase_step(&t->mod_phase[1], freq * ratios[r2] * fine2, m->sample_rate);
     float fb = pnorm(p[2]) * 3.5f;
     float m1 = sinf(2.0f * (float)M_PI * t->mod_phase[0] + t->fm_feedback * fb);
-    float m2 = sinf(2.0f * (float)M_PI * t->mod_phase[1]);
+    float m2 = sinf(2.0f * (float)M_PI * t->mod_phase[1] +
+                     t->fm_feedback2 * pnorm(a[1]) * 3.5f);
+    int r3 = (a[2] * 16) / 128;
+    phase_step(&t->mod_phase[2], freq * ratios[r3], m->sample_rate);
+    float m3 = sinf(2.0f * (float)M_PI * t->mod_phase[2]);
     float index = pnorm(p[3]) * 8.0f;
     float index2 = pnorm(p[5]) * 8.0f;
     phase_step(&t->phase[0], freq, m->sample_rate);
-    float v = sinf(2.0f * (float)M_PI * t->phase[0] + m1 * index + m2 * index2);
+    float v = sinf(2.0f * (float)M_PI * t->phase[0] + m1 * index +
+                   m2 * index2 + m3 * pnorm(a[3]) * 8.0f);
     t->fm_feedback = m1;
+    t->fm_feedback2 = m2;
     float tone = 0.2f + 0.8f * pnorm(p[6]);
     return tanhf(v / tone) * tone;
 }
 
-static float oscillator(mono_t *m, mono_track_t *t, float freq) {
-    switch (t->machine) {
-    case MONO_SWAVE_PULSE: return osc_swavepulse(m, t, freq);
-    case MONO_SWAVE_ENSEMBLE: return osc_ensemble(m, t, freq);
-    case MONO_SID_6581: return osc_sid(m, t, freq);
-    case MONO_DIGIPRO_WAVE: return osc_digipro(m, t, freq);
-    case MONO_FM_STATIC: return osc_fm(m, t, freq);
-    default: return osc_swavesaw(m, t, freq);
+static float secondary_finish(mono_track_t *t, float v) {
+    const uint8_t *a = t->effective + MONO_ALT_BASE;
+    if (a[5]) {
+        float drive = 1.0f + pnorm(a[5]) * 12.0f;
+        v = tanhf(v * drive) / tanhf(drive);
     }
+    if (a[6]) {
+        int bits = 16 - (a[6] * 12) / 127;
+        float levels = (float)((1u << bits) - 1u);
+        v = roundf(v * levels) / levels;
+    }
+    if (a[7]) {
+        float noise = ((int32_t)xrnd(&t->noise)) / 2147483648.0f;
+        float mix = pnorm(a[7]) * 0.35f;
+        v += (noise - v) * mix;
+    }
+    return v;
+}
+
+static float oscillator(mono_t *m, mono_track_t *t, float freq) {
+    float v;
+    switch (t->machine) {
+    case MONO_SWAVE_PULSE: v = osc_swavepulse(m, t, freq); break;
+    case MONO_SWAVE_ENSEMBLE: v = osc_ensemble(m, t, freq); break;
+    case MONO_SID_6581: v = osc_sid(m, t, freq); break;
+    case MONO_DIGIPRO_WAVE: v = osc_digipro(m, t, freq); break;
+    case MONO_FM_STATIC: v = osc_fm(m, t, freq); break;
+    default: v = osc_swavesaw(m, t, freq); break;
+    }
+    return secondary_finish(t, v);
 }
 
 static float cutoff_from_param(float p) {
@@ -661,6 +744,13 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     else
         t->freq = t->target_freq;
     float freq = t->freq * powf(2.0f, pitch_mod / 12.0f);
+    const uint8_t *alt = t->effective + MONO_ALT_BASE;
+    if (alt[4]) {
+        phase_step(&t->mod_phase[3], 0.05f + 0.45f * pnorm(alt[4]), m->sample_rate);
+        float drift = sinf(2.0f * (float)M_PI * t->mod_phase[3]) *
+                      pnorm(alt[4]) * 0.125f;
+        freq *= powf(2.0f, drift / 12.0f);
+    }
     float x = oscillator(m, t, fclamp(freq, 1.0f, m->sample_rate * 0.45f));
 
     const uint8_t *ap = t->effective + 8;
@@ -839,6 +929,10 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
 static int param_id(const mono_t *m, const char *key) {
     int a, b;
     if (sscanf(key, "syn%d", &a) == 1 && a >= 1 && a <= 8) return a - 1;
+    if (sscanf(key, "syn%d", &a) == 1 && a >= 9 && a <= 16)
+        return MONO_ALT_BASE + a - 9;
+    if (sscanf(key, "alt%d", &a) == 1 && a >= 1 && a <= MONO_ALT_PARAMS)
+        return MONO_ALT_BASE + a - 1;
     if (sscanf(key, "amp%d", &a) == 1 && a >= 1 && a <= 8) return 8 + a - 1;
     if (sscanf(key, "flt%d", &a) == 1 && a >= 1 && a <= 8) return 16 + a - 1;
     if (sscanf(key, "fx%d", &a) == 1 && a >= 1 && a <= 8) return 24 + a - 1;
@@ -864,6 +958,7 @@ static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
     memset(t->phase, 0, sizeof(t->phase));
     memset(t->mod_phase, 0, sizeof(t->mod_phase));
     t->fm_feedback = 0.0f;
+    t->fm_feedback2 = 0.0f;
     memset(&t->amp, 0, sizeof(t->amp));
     memset(&t->filter_env, 0, sizeof(t->filter_env));
     for (int i = 0; i < 3; ++i) {
@@ -910,7 +1005,7 @@ static int read_hex(const char **cursor, const char *end, int digits,
  * fully populated six-track, 64-step pattern below the chain host's 16 KiB
  * state ceiling in the normal (sparse-lock) case. */
 static int compact_state_pass(mono_t *m, const char *data, const char *end,
-                              int apply) {
+                              int saved_params, int mask_digits, int apply) {
     const char *p = data;
     unsigned seen_tracks = 0;
     while (p < end) {
@@ -923,7 +1018,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
             uint8_t params[MONO_PARAMS];
             if (!read_hex(&p, end, 2, &machine64) ||
                 machine64 >= MONO_MACHINE_COUNT) return 0;
-            for (int i = 0; i < MONO_PARAMS; ++i) {
+            for (int i = 0; i < saved_params; ++i) {
                 uint64_t param;
                 if (!read_hex(&p, end, 2, &param) || param > 127) return 0;
                 params[i] = (uint8_t)param;
@@ -932,9 +1027,9 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 seen_tracks |= 1u << tr;
                 if (apply) {
                     mono_track_t *t = &m->track[tr];
-                    t->machine = (mono_machine_t)machine64;
-                    memcpy(t->base, params, sizeof(params));
-                    memcpy(t->effective, params, sizeof(params));
+                    machine_defaults(t, (mono_machine_t)machine64);
+                    memcpy(t->base, params, (size_t)saved_params);
+                    memcpy(t->effective, t->base, MONO_PARAMS);
                 }
             }
             continue;
@@ -947,7 +1042,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 !read_hex(&p, end, 2, &velocity64) || velocity64 > 127 ||
                 !read_hex(&p, end, 2, &gate64) || gate64 > 127 ||
                 !read_hex(&p, end, 2, &trig64) || trig64 > 15 ||
-                !read_hex(&p, end, 14, &mask)) return 0;
+                !read_hex(&p, end, mask_digits, &mask)) return 0;
             mono_step_t *step = tr < m->track_count
                 ? &m->track[tr].steps[(int)step64] : NULL;
             if (apply && step) {
@@ -957,7 +1052,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 step->trig_mask = (uint8_t)trig64;
                 step->lock_mask = mask;
             }
-            for (int i = 0; i < MONO_PARAMS; ++i) {
+            for (int i = 0; i < saved_params; ++i) {
                 if (!(mask & (UINT64_C(1) << i))) continue;
                 uint64_t lock_value;
                 if (!read_hex(&p, end, 2, &lock_value) || lock_value > 127) return 0;
@@ -984,16 +1079,20 @@ static float json_float(const char *json, const char *key, float fallback) {
 static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
+    int version = json_int(json, "\"v\":", 0);
+    if (version != 2 && version != 3) return;
+    int saved_params = version >= 3 ? MONO_PARAMS : MONO_PRIMARY_PARAMS;
+    int mask_digits = version >= 3 ? 16 : 14;
     const char *data = tag + strlen("\"data\":\"");
     const char *end = strchr(data, '"');
-    if (!end || !compact_state_pass(m, data, end, 0)) return;
+    if (!end || !compact_state_pass(m, data, end, saved_params, mask_digits, 0)) return;
 
     for (int tr = 0; tr < m->track_count; ++tr) {
         for (int step = 0; step < MONO_STEPS; ++step)
             clear_step(&m->track[tr].steps[step]);
         reset_track_runtime(m, &m->track[tr], tr);
     }
-    if (!compact_state_pass(m, data, end, 1)) return;
+    if (!compact_state_pass(m, data, end, saved_params, mask_digits, 1)) return;
 
     m->selected_track = iclamp(json_int(json, "\"track\":", 0),
                                0, m->track_count - 1);
@@ -1172,10 +1271,12 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         }
         int n = 0;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":2,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":3,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_len\":%d,\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
+                     "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
+                     "\"alt5\":%d,\"alt6\":%d,\"alt7\":%d,\"alt8\":%d,"
                      "\"steps\":\"%s\",\"data\":\"",
                      m->selected_track, m->selected_page, m->step_page,
                      m->pattern_len, m->master * 100.0f, m->bpm_override,
@@ -1184,6 +1285,10 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
                      t->base[m->selected_page * 8 + 4], t->base[m->selected_page * 8 + 5],
                      t->base[m->selected_page * 8 + 6], t->base[m->selected_page * 8 + 7],
+                     t->base[MONO_ALT_BASE], t->base[MONO_ALT_BASE + 1],
+                     t->base[MONO_ALT_BASE + 2], t->base[MONO_ALT_BASE + 3],
+                     t->base[MONO_ALT_BASE + 4], t->base[MONO_ALT_BASE + 5],
+                     t->base[MONO_ALT_BASE + 6], t->base[MONO_ALT_BASE + 7],
                      step_csv)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];
@@ -1194,7 +1299,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                 const mono_step_t *step = &saved->steps[si];
                 if (step->note < 0 && !step->trig_mask && !step->lock_mask) continue;
                 if (!appendf(buf, buf_len, &n,
-                             "S%X%02X%02X%02X%02X%02X%014llX",
+                             "S%X%02X%02X%02X%02X%02X%016llX",
                              tr, si, (unsigned)(uint8_t)step->note,
                              step->velocity, step->gate, step->trig_mask,
                              (unsigned long long)step->lock_mask)) return -1;

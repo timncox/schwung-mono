@@ -29,6 +29,10 @@ Every track also has an AHDR envelope, dual-cutoff resonant filter,
 distortion, EQ, sample-rate reduction, stereo filtered delay, portamento,
 pan, and three assignable LFOs.
 
+On the SYNTH page, hold Shift while turning knobs 1–8 to open the secondary
+machine layer. The first four controls are machine-specific; the last four are
+Drift, Fold, Bits, and Noise. Shift + jog continues to change machines.
+
 LFO destination is a named seven-choice control: Off, Pitch, Filter Base,
 Filter Width, Volume, Pan, or Delay.
 
@@ -73,6 +77,7 @@ scripts/deploy.sh
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
 - Knobs 1-8: edit the current page
+- Shift + knobs 1-8 on SYNTH: edit the secondary machine layer
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
 

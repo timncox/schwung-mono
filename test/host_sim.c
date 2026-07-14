@@ -42,6 +42,19 @@ static uint64_t render_hash(mono_t *m) {
     return h;
 }
 
+static uint64_t render_hash_long(mono_t *m) {
+    int16_t out[BLOCK * 2];
+    uint64_t h = UINT64_C(1469598103934665603);
+    for (int b = 0; b < 64; ++b) {
+        mono_render(m, out, BLOCK);
+        for (int i = 0; i < BLOCK * 2; ++i) {
+            h ^= (uint16_t)out[i];
+            h *= UINT64_C(1099511628211);
+        }
+    }
+    return h;
+}
+
 static int get_int(mono_t *m, const char *key) {
     char buf[256];
     assert(mono_get_param(m, key, buf, sizeof(buf)) >= 0);
@@ -127,7 +140,55 @@ static void test_parameter_aliases(void) {
     assert(get_int(m, "p1") == 48);
     mono_set_param(m, "p1", "96");
     assert(get_int(m, "lfo1_1") == 6);
+    mono_set_param(m, "syn9", "73");
+    assert(get_int(m, "alt1") == 73);
+    mono_set_param(m, "alt8", "19");
+    assert(get_int(m, "syn16") == 19);
     mono_destroy(m);
+}
+
+static void test_shift_layer_controls_are_audible(void) {
+    for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
+        mono_t *baseline = mono_create(&host, 1);
+        mono_t *changed = mono_create(&host, 1);
+        assert(baseline && changed);
+        char value[16], key[16];
+        snprintf(value, sizeof(value), "%d", machine);
+        mono_set_param(baseline, "machine", value);
+        mono_set_param(changed, "machine", value);
+        for (int i = 0; i < 8; ++i) {
+            snprintf(key, sizeof(key), "syn%d", i + 1);
+            mono_set_param(baseline, key, "64");
+            mono_set_param(changed, key, "64");
+        }
+        for (int i = 0; i < 4; ++i) {
+            snprintf(key, sizeof(key), "alt%d", i + 1);
+            mono_set_param(changed, key, get_int(changed, key) == 127 ? "0" : "127");
+        }
+        mono_note_on(baseline, 0, 48, 112);
+        mono_note_on(changed, 0, 48, 112);
+        uint64_t baseline_hash = render_hash_long(baseline);
+        uint64_t changed_hash = render_hash_long(changed);
+        if (baseline_hash == changed_hash)
+            fprintf(stderr, "inaudible machine shift bank: machine=%d\n", machine);
+        assert(baseline_hash != changed_hash);
+        mono_destroy(baseline);
+        mono_destroy(changed);
+    }
+
+    for (int alt = 5; alt <= 8; ++alt) {
+        mono_t *baseline = mono_create(&host, 1);
+        mono_t *changed = mono_create(&host, 1);
+        assert(baseline && changed);
+        char key[16];
+        snprintf(key, sizeof(key), "alt%d", alt);
+        mono_set_param(changed, key, "127");
+        mono_note_on(baseline, 0, 48, 112);
+        mono_note_on(changed, 0, 48, 112);
+        assert(render_hash_long(baseline) != render_hash_long(changed));
+        mono_destroy(baseline);
+        mono_destroy(changed);
+    }
 }
 
 static void test_sequencer_and_lock(void) {
@@ -258,15 +319,18 @@ static void test_full_state_round_trip(void) {
     mono_set_param(source, "machine", "5");
     mono_set_param(source, "page", "6");
     mono_set_param(source, "p8", "111");
+    mono_set_param(source, "alt1", "87");
+    mono_set_param(source, "alt8", "29");
     mono_set_param(source, "set_step", "63:72:127:64:9");
     mono_set_param(source, "lock", "4:63:55:33");
+    mono_set_param(source, "lock", "4:63:63:91");
     mono_set_param(source, "step_page", "3");
     mono_set_param(source, "transport", "1");
 
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":2"));
+    assert(strstr(state, "\"v\":3"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -279,6 +343,8 @@ static void test_full_state_round_trip(void) {
     assert(get_int(restored, "master") == 137);
     assert(get_int(restored, "machine") == 5);
     assert(get_int(restored, "p8") == 111);
+    assert(get_int(restored, "alt1") == 87);
+    assert(get_int(restored, "alt8") == 29);
     char steps[128];
     get_string(restored, "steps", steps, sizeof(steps));
     assert(steps[strlen(steps) - 1] == '2');
@@ -301,6 +367,39 @@ static void test_full_state_round_trip(void) {
 
     mono_set_param(restored, "state", "{\"v\":2,\"data\":\"T0BAD\"}");
     assert(get_int(restored, "machine") == 5); /* malformed snapshots are ignored */
+    mono_destroy(source);
+    mono_destroy(restored);
+}
+
+static void test_v2_presets_receive_machine_shift_defaults(void) {
+    mono_t *source = mono_create(&host, 1);
+    mono_t *restored = mono_create(&host, 1);
+    assert(source && restored);
+    char state[4096];
+    int used = snprintf(state, sizeof(state),
+                        "{\"v\":2,\"track\":0,\"page\":0,\"step_page\":0,"
+                        "\"pattern_len\":16,\"master\":70,\"data\":\"T000");
+    for (int page = 0; page < MONO_PAGES; ++page) {
+        char value[16];
+        snprintf(value, sizeof(value), "%d", page);
+        mono_set_param(source, "page", value);
+        for (int param = 1; param <= 8; ++param) {
+            char key[16];
+            snprintf(key, sizeof(key), "p%d", param);
+            used += snprintf(state + used, sizeof(state) - (size_t)used,
+                             "%02X", get_int(source, key));
+        }
+    }
+    used += snprintf(state + used, sizeof(state) - (size_t)used, "\"}");
+    assert(used > 0 && used < (int)sizeof(state));
+
+    mono_set_param(restored, "machine", "5");
+    mono_set_param(restored, "alt1", "99");
+    mono_set_param(restored, "state", state);
+    assert(get_int(restored, "machine") == 0);
+    assert(get_int(restored, "alt1") == 0);
+    assert(get_int(restored, "alt2") == 21);
+    assert(get_int(restored, "alt3") == 64);
     mono_destroy(source);
     mono_destroy(restored);
 }
@@ -346,6 +445,12 @@ static void test_maximum_lock_state_fits_overtake_channel(void) {
     assert(state);
     int state_len = mono_get_param(m, "state", state, 65536);
     assert(state_len > 0 && state_len < 65536);
+    mono_t *restored = mono_create(&host, 6);
+    assert(restored);
+    mono_set_param(restored, "state", state);
+    mono_set_param(restored, "track", "5");
+    assert(get_int(restored, "alt8") == get_int(m, "alt8"));
+    mono_destroy(restored);
     free(state);
     mono_destroy(m);
 }
@@ -355,6 +460,7 @@ int main(void) {
     test_note_release();
     test_filters_remain_finite_and_retrigger();
     test_parameter_aliases();
+    test_shift_layer_controls_are_audible();
     test_sequencer_and_lock();
     test_internal_clock();
     test_clock_loss_falls_back();
@@ -362,6 +468,7 @@ int main(void) {
     test_production_event_paths();
     test_remote_state_contract();
     test_full_state_round_trip();
+    test_v2_presets_receive_machine_shift_defaults();
     test_dense_pattern_fits_host_state_limit();
     test_maximum_lock_state_fits_overtake_channel();
     puts("mono host simulator: all tests passed");

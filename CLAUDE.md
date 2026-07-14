@@ -1,6 +1,6 @@
 ---
 status: active
-last_touched: 2026-07-13
+last_touched: 2026-07-14
 ---
 
 # Mono
@@ -20,8 +20,9 @@ content. Version 0.1 is a playable architectural slice, not a bit-exact clone.
 
 ## Engine
 
-Each track owns one monophonic voice, 56 base/effective parameters (seven
-pages of eight), three LFOs, amp/filter envelopes, dual state-variable filters,
+Each track owns one monophonic voice, 64 base/effective parameters (seven
+pages of eight plus an eight-control Shift synthesis layer), three LFOs,
+amp/filter envelopes, dual state-variable filters,
 sample-rate reduction, distortion, a filtered stereo delay, and 64 sequencer
 steps. The initial machine set is:
 
@@ -39,6 +40,8 @@ milestones.
 ## Parameter pages
 
 - 0 SYNTH: eight machine-specific controls.
+- Shift + SYNTH: four additional machine-specific controls plus drift, fold,
+  bit depth, and noise.
 - 1 AMP: attack, hold, decay, release, distortion, volume, pan, portamento.
 - 2 FILTER: base, width, HP resonance, LP resonance, envelope attack,
   envelope decay, envelope base, envelope width.
@@ -47,13 +50,14 @@ milestones.
   interlace, depth, phase.
 
 The sound-generator manifest exposes stable `synN`, `ampN`, `fltN`, `fxN`,
-and `lfoX_N` keys. The overtake UI exposes the selected page through dynamic
-`p1`...`p8` aliases.
+and `lfoX_N` keys. Secondary synthesis controls use stable `syn9`...`syn16`
+and `alt1`...`alt8` aliases. The overtake UI exposes the selected page through
+dynamic `p1`...`p8` aliases.
 
 ## Sequencer
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
-independent note/amp/filter/LFO trigger bits, and locks for any of the 56 page
+independent note/amp/filter/LFO trigger bits, and locks for any of the 64 sound
 parameters. On each trig, effective parameters reset to the track's base values
 and then apply that step's locks. MIDI clock advances at six ticks per 16th;
 the engine falls back to `host->get_bpm()` when its own transport is running
