@@ -37,6 +37,7 @@ const STEP_FIRST = 16, STEP_COUNT = 16;
 
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let patternLen = 16, playStep = -1, shift = false, tickCount = 0;
+let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
 let focusBank = 0;
@@ -44,6 +45,11 @@ let focusBank = 0;
 function gp(key) {
     const v = host_module_get_param(key);
     return v === null || v === undefined ? null : String(v);
+}
+function shiftActive() {
+    if (typeof shadow_get_shift_held === 'function' && shadow_get_shift_held() !== 0)
+        return true;
+    return shift;
 }
 function names() { return page === 0 ? SYNTH[machine] : COMMON[page]; }
 
@@ -102,7 +108,7 @@ function adjust(i, delta) {
     if (heldStep) {
         heldStep.used = true;
         const absoluteParam = page * 8 + i;
-        if (shift)
+        if (shiftActive())
             host_module_set_param('unlock', `${track}:${heldStep.step}:${absoluteParam}:0`);
         else
             host_module_set_param('lock', `${track}:${heldStep.step}:${absoluteParam}:${v}`);
@@ -110,7 +116,7 @@ function adjust(i, delta) {
     } else {
         host_module_set_param(`p${i + 1}`, `${v}`);
     }
-    announceParameter(names()[i], shift && heldStep ? 'unlocked' : `${v}`);
+    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : `${v}`);
     needsRedraw = true;
 }
 
@@ -156,7 +162,7 @@ function draw() {
         print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
     }
     drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
-                right: heldStep ? (shift ? 'turn=unlock' : 'turn=lock')
+                right: heldStep ? (shiftActive() ? 'turn=unlock' : 'turn=lock')
                     : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
     needsRedraw = false;
 }
@@ -175,6 +181,8 @@ globalThis.onResume = function() {
 
 globalThis.tick = function() {
     tickCount++;
+    const active = shiftActive();
+    if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (!ready) ready = fetchAll();
     if (ready && !heldStep && tickCount % 6 === 0) {
         const oldPlay = playStep, oldTransport = transport;
@@ -223,7 +231,7 @@ globalThis.onMidiMessageInternal = function(data) {
             paintSteps(false); needsRedraw = true; return;
         }
         for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) { selectTrack(i); return; }
-        if (d1 === PAD_MACHINE) { cycleMachine(shift ? -1 : 1); return; }
+        if (d1 === PAD_MACHINE) { cycleMachine(shiftActive() ? -1 : 1); return; }
         if (d1 === PAD_TRANSPORT) { toggleTransport(); return; }
         if (d1 >= 68 && d1 < 92) return;
     }

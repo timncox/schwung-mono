@@ -28,12 +28,19 @@ const SYNTH = [
     ['1FRQ','1FIN','1FB','1ENV','2FRQ','2VOL','TONE','TUNE']
 ];
 
-let page = 0, machine = 0, shift = false, values = new Array(8).fill(0);
+let page = 0, machine = 0, shift = false, shiftVisual = false;
+let values = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
 
 function gp(key) {
     const v = host_module_get_param(key);
     return v === null || v === undefined ? null : String(v);
+}
+
+function shiftActive() {
+    if (typeof shadow_get_shift_held === 'function' && shadow_get_shift_held() !== 0)
+        return true;
+    return shift;
 }
 
 function names() { return page === 0 ? SYNTH[machine] : COMMON[page]; }
@@ -86,7 +93,7 @@ function draw() {
         print(x, 34, `${values[i]}`.padStart(3, '0'), 1);
     }
     drawFooter({left: `${PAGES[page]} K${first + 1}-${first + 4}`,
-                right: shift ? 'jog=machine' : 'jog=page'});
+                right: shiftActive() ? 'jog=machine' : 'jog=page'});
     needsRedraw = false;
 }
 
@@ -100,6 +107,8 @@ globalThis.onResume = function() { ready = fetchAll(); needsRedraw = true; };
 
 globalThis.tick = function() {
     if (!ready) ready = fetchAll();
+    const active = shiftActive();
+    if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (needsRedraw) draw();
 };
 
@@ -109,7 +118,7 @@ globalThis.onMidiMessageInternal = function(data) {
     if (cc === MoveShift) { shift = val > 0; needsRedraw = true; return; }
     if (cc === MoveMainKnob) {
         const d = decodeDelta(val);
-        if (d) shift ? setMachine(machine + d) : setPage(page + d);
+        if (d) shiftActive() ? setMachine(machine + d) : setPage(page + d);
         return;
     }
     if (cc === MoveLeft && val >= 64) { setPage(page - 1); return; }
