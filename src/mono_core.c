@@ -78,6 +78,9 @@ typedef struct {
     mono_env_t amp;
     mono_env_t filter_env;
     mono_lfo_t lfo[3];
+    /* LFO-to-LFO modulation is fed into the next sample. This makes cross- and
+     * self-modulation deterministic without recursively evaluating an LFO. */
+    float lfo_param_mod[3 * MONO_PAGE_PARAMS];
     mono_svf_t hp[2];
     mono_svf_t lp[2];
     mono_svf_t eq;
@@ -135,7 +138,25 @@ static int is_lfo_destination_param(int pid) {
 }
 
 static int lfo_destination_index(int value) {
-    return iclamp(value / 16, 0, 6);
+    return iclamp(value, 0, MONO_LFO_DESTINATIONS - 1);
+}
+
+static int lfo_destination_param(int destination) {
+    return destination >= 2 ? destination - 2 : -1;
+}
+
+static int migrate_legacy_lfo_destination(int value) {
+    /* v2/v3 stored the original seven destinations as 0,16,...,96. */
+    static const uint8_t migrated[7] = {
+        0,                  /* Off */
+        1,                  /* Pitch */
+        2 + 16,             /* Filter Base */
+        2 + 17,             /* Filter Width */
+        2 + 13,             /* Volume */
+        2 + 14,             /* Pan */
+        2 + 28              /* Delay Time */
+    };
+    return migrated[iclamp(value / 16, 0, 6)];
 }
 
 static int appendf(char *buf, int buf_len, int *used, const char *fmt, ...) {
@@ -424,8 +445,7 @@ static void track_pitch(mono_track_t *t, int note, int velocity) {
     t->note = note;
     t->last_note = note;
     t->velocity = iclamp(velocity, 1, 127);
-    float tune = ((int)t->effective[7] - 64) / 64.0f;
-    t->target_freq = midi_freq(note + tune);
+    t->target_freq = midi_freq(note);
     if (t->freq <= 0.0f || t->effective[15] == 0) t->freq = t->target_freq;
 }
 
@@ -719,33 +739,72 @@ static float svf(mono_svf_t *s, float in, float hz, float resonance,
 }
 
 static float render_track(mono_t *m, mono_track_t *t, float *right) {
-    if (t->gate_left > 0 && --t->gate_left == 0)
-        env_release(&t->amp, t->effective[11], m->sample_rate);
-
     float bpm = bpm_now(m);
-    float pitch_mod = 0.0f, base_mod = 0.0f, width_mod = 0.0f;
-    float vol_mod = 0.0f, pan_mod = 0.0f, delay_mod = 0.0f;
+    uint8_t unmodulated[MONO_PARAMS];
+    uint8_t modulated[MONO_PARAMS];
+    float next_lfo_mod[3 * MONO_PAGE_PARAMS] = {0};
+    int target_pid[3] = {-1, -1, -1};
+    float target_delta[3] = {0};
+    memcpy(unmodulated, t->effective, sizeof(unmodulated));
+    memcpy(modulated, unmodulated, sizeof(modulated));
+
+    /* LFO controls receive the previous sample's modulation while the current
+     * outputs are evaluated. All other destinations are applied immediately. */
+    for (int pid = 32; pid < MONO_PRIMARY_PARAMS; ++pid) {
+        int value = (int)lrintf(unmodulated[pid] + t->lfo_param_mod[pid - 32]);
+        int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
+        modulated[pid] = (uint8_t)iclamp(value, 0, max);
+    }
+
+    float pitch_mod = 0.0f;
     for (int i = 0; i < 3; ++i) {
-        const uint8_t *lp = t->effective + (4 + i) * 8;
+        const uint8_t *lp = modulated + (4 + i) * 8;
         int dest = lfo_destination_index(lp[0]);
         float v = lfo_tick(&t->lfo[i], lp, bpm, m->sample_rate);
-        switch (dest) {
-        case 1: pitch_mod += v * 24.0f; break;
-        case 2: base_mod += v * 64.0f; break;
-        case 3: width_mod += v * 64.0f; break;
-        case 4: vol_mod += v; break;
-        case 5: pan_mod += v; break;
-        case 6: delay_mod += v * 64.0f; break;
-        default: break;
+        if (dest == 1) {
+            pitch_mod += v * 24.0f;
+        } else {
+            int pid = lfo_destination_param(dest);
+            if (pid >= 0 && pid < MONO_PARAMS) {
+                target_pid[i] = pid;
+                target_delta[i] = v * 64.0f;
+            }
         }
     }
+
+    /* At most three params are targeted per sample. Accumulate duplicate
+     * routes without scanning all 64 params in the realtime path. */
+    for (int i = 0; i < 3; ++i) {
+        int pid = target_pid[i];
+        if (pid < 0) continue;
+        int already_applied = 0;
+        float delta = 0.0f;
+        for (int j = 0; j < 3; ++j) {
+            if (target_pid[j] == pid) {
+                if (j < i) already_applied = 1;
+                delta += target_delta[j];
+            }
+        }
+        if (already_applied) continue;
+        int value = (int)lrintf(unmodulated[pid] + delta);
+        int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
+        modulated[pid] = (uint8_t)iclamp(value, 0, max);
+        if (pid >= 32 && pid < MONO_PRIMARY_PARAMS)
+            next_lfo_mod[pid - 32] = delta;
+    }
+    memcpy(t->lfo_param_mod, next_lfo_mod, sizeof(next_lfo_mod));
+    memcpy(t->effective, modulated, sizeof(modulated));
+
+    if (t->gate_left > 0 && --t->gate_left == 0)
+        env_release(&t->amp, t->effective[11], m->sample_rate);
 
     float port_sec = time_from_param(t->effective[15], 3.0f);
     if (port_sec > 0.0f)
         t->freq += (t->target_freq - t->freq) / fmaxf(1.0f, port_sec * m->sample_rate);
     else
         t->freq = t->target_freq;
-    float freq = t->freq * powf(2.0f, pitch_mod / 12.0f);
+    float tune = ((int)t->effective[7] - 64) / 64.0f;
+    float freq = t->freq * powf(2.0f, (pitch_mod + tune) / 12.0f);
     const uint8_t *alt = t->effective + MONO_ALT_BASE;
     if (alt[4]) {
         phase_step(&t->mod_phase[3], 0.05f + 0.45f * pnorm(alt[4]), m->sample_rate);
@@ -765,8 +824,8 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     x = tanhf(x * drive) / tanhf(drive);
     x *= aenv * vel;
 
-    float base = fp[0] + base_mod + (((int)fp[6] - 64) * fenv);
-    float width = fp[1] + width_mod + (((int)fp[7] - 64) * fenv);
+    float base = fp[0] + (((int)fp[6] - 64) * fenv);
+    float width = fp[1] + (((int)fp[7] - 64) * fenv);
     base = fclamp(base, 0.0f, 127.0f);
     width = fclamp(width, 0.0f, 127.0f);
     float hp_hz = cutoff_from_param(base);
@@ -788,15 +847,15 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     }
     x = t->srr_hold;
 
-    float volume = fclamp(pnorm(ap[5]) * (1.0f + vol_mod), 0.0f, 1.5f);
-    float pan = fclamp(((int)ap[6] - 64) / 64.0f + pan_mod, -1.0f, 1.0f);
+    float volume = pnorm(ap[5]);
+    float pan = fclamp(((int)ap[6] - 64) / 64.0f, -1.0f, 1.0f);
     float lg = sqrtf(0.5f * (1.0f - pan));
     float rg = sqrtf(0.5f * (1.0f + pan));
     float left = x * volume * lg;
     *right = x * volume * rg;
 
     int delay_frames = m->sample_rate * MONO_DELAY_SECONDS;
-    float delay_p = fclamp(ep[4] + delay_mod, 0.0f, 127.0f);
+    float delay_p = ep[4];
     int offset = (int)((0.015f + 1.82f * delay_p / 127.0f) * m->sample_rate);
     offset = iclamp(offset, 1, delay_frames - 1);
     int rp = t->delay_pos - offset;
@@ -820,6 +879,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     if (++t->delay_pos >= delay_frames) t->delay_pos = 0;
     left += dl * send;
     *right += dr * send;
+    memcpy(t->effective, unmodulated, sizeof(unmodulated));
     return left;
 }
 
@@ -968,6 +1028,7 @@ static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
         t->lfo[i].held = 0.0f;
         t->lfo[i].stopped = 0;
     }
+    memset(t->lfo_param_mod, 0, sizeof(t->lfo_param_mod));
     memset(t->hp, 0, sizeof(t->hp));
     memset(t->lp, 0, sizeof(t->lp));
     memset(&t->eq, 0, sizeof(t->eq));
@@ -1007,7 +1068,8 @@ static int read_hex(const char **cursor, const char *end, int digits,
  * fully populated six-track, 64-step pattern below the chain host's 16 KiB
  * state ceiling in the normal (sparse-lock) case. */
 static int compact_state_pass(mono_t *m, const char *data, const char *end,
-                              int saved_params, int mask_digits, int apply) {
+                              int saved_params, int mask_digits,
+                              int legacy_destinations, int apply) {
     const char *p = data;
     unsigned seen_tracks = 0;
     while (p < end) {
@@ -1023,6 +1085,8 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
             for (int i = 0; i < saved_params; ++i) {
                 uint64_t param;
                 if (!read_hex(&p, end, 2, &param) || param > 127) return 0;
+                if (legacy_destinations && is_lfo_destination_param(i))
+                    param = (uint64_t)migrate_legacy_lfo_destination((int)param);
                 params[i] = (uint8_t)param;
             }
             if (tr < m->track_count) {
@@ -1058,6 +1122,8 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 if (!(mask & (UINT64_C(1) << i))) continue;
                 uint64_t lock_value;
                 if (!read_hex(&p, end, 2, &lock_value) || lock_value > 127) return 0;
+                if (legacy_destinations && is_lfo_destination_param(i))
+                    lock_value = (uint64_t)migrate_legacy_lfo_destination((int)lock_value);
                 if (apply && step) step->lock_values[i] = (uint8_t)lock_value;
             }
             continue;
@@ -1082,19 +1148,22 @@ static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
     int version = json_int(json, "\"v\":", 0);
-    if (version != 2 && version != 3) return;
+    if (version != 2 && version != 3 && version != 4) return;
     int saved_params = version >= 3 ? MONO_PARAMS : MONO_PRIMARY_PARAMS;
     int mask_digits = version >= 3 ? 16 : 14;
+    int legacy_destinations = version < 4;
     const char *data = tag + strlen("\"data\":\"");
     const char *end = strchr(data, '"');
-    if (!end || !compact_state_pass(m, data, end, saved_params, mask_digits, 0)) return;
+    if (!end || !compact_state_pass(m, data, end, saved_params, mask_digits,
+                                    legacy_destinations, 0)) return;
 
     for (int tr = 0; tr < m->track_count; ++tr) {
         for (int step = 0; step < MONO_STEPS; ++step)
             clear_step(&m->track[tr].steps[step]);
         reset_track_runtime(m, &m->track[tr], tr);
     }
-    if (!compact_state_pass(m, data, end, saved_params, mask_digits, 1)) return;
+    if (!compact_state_pass(m, data, end, saved_params, mask_digits,
+                            legacy_destinations, 1)) return;
 
     m->selected_track = iclamp(json_int(json, "\"track\":", 0),
                                0, m->track_count - 1);
@@ -1130,7 +1199,8 @@ static void set_lock(mono_t *m, const char *val, int clear) {
     if (clear) s->lock_mask &= ~(UINT64_C(1) << pid);
     else {
         s->lock_mask |= UINT64_C(1) << pid;
-        s->lock_values[pid] = (uint8_t)iclamp(value, 0, 127);
+        int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
+        s->lock_values[pid] = (uint8_t)iclamp(value, 0, max);
     }
 }
 
@@ -1170,11 +1240,8 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!strcmp(key, "machine")) { select_machine(t, v); changed(m); return; }
     int pid = param_id(m, key);
     if (pid >= 0) {
-        /* Hierarchy editors expose destinations as a seven-choice enum. The
-         * compact Move/remote editors use the canonical 0,16,...,96 values. */
-        if (is_lfo_destination_param(pid) && strncmp(key, "p", 1) && v <= 6)
-            v *= 16;
-        t->base[pid] = (uint8_t)iclamp(v, 0, 127);
+        int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
+        t->base[pid] = (uint8_t)iclamp(v, 0, max);
         t->effective[pid] = t->base[pid];
         changed(m);
         return;
@@ -1235,9 +1302,6 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "machine")) return snprintf(buf, (size_t)buf_len, "%d", t->machine);
     int pid = param_id(m, key);
     if (pid >= 0) {
-        if (is_lfo_destination_param(pid) && strncmp(key, "p", 1))
-            return snprintf(buf, (size_t)buf_len, "%d",
-                            lfo_destination_index(t->base[pid]));
         return snprintf(buf, (size_t)buf_len, "%d", t->base[pid]);
     }
     if (!strcmp(key, "steps")) {
@@ -1284,7 +1348,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         }
         int n = 0;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":3,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":4,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_len\":%d,\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"

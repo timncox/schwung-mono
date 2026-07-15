@@ -10,7 +10,17 @@ import { announce, announceParameter, announceView }
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
 const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3'];
-const LFO_DESTS = ['OFF', 'PITCH', 'FBASE', 'FWID', 'VOL', 'PAN', 'DELAY'];
+const LFO_DESTS = [
+    'OFF','PITCH',
+    'SYN 1','SYN 2','SYN 3','SYN 4','SYN 5','SYN 6','SYN 7','TUNE',
+    'AMP ATK','AMP HLD','AMP DEC','AMP REL','DIST','VOLUME','PAN','PORT',
+    'FLT BASE','FLT WID','HP Q','LP Q','F ATK','F DEC','F BASE','F WID',
+    'EQ FREQ','EQ GAIN','SR RED','D SEND','D TIME','D FB','D BASE','D WIDTH',
+    'L1 DEST','L1 TRIG','L1 WAVE','L1 MULT','L1 SPEED','L1 INTL','L1 DEPTH','L1 PHASE',
+    'L2 DEST','L2 TRIG','L2 WAVE','L2 MULT','L2 SPEED','L2 INTL','L2 DEPTH','L2 PHASE',
+    'L3 DEST','L3 TRIG','L3 WAVE','L3 MULT','L3 SPEED','L3 INTL','L3 DEPTH','L3 PHASE',
+    'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BITS','NOISE'
+];
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -57,7 +67,7 @@ function shiftLayer() { return page === 0 && shiftActive(); }
 function names() { return page === 0 ? (shiftLayer() ? SYNTH_SHIFT[machine] : SYNTH[machine]) : COMMON[page]; }
 function activeValues() { return shiftLayer() ? altValues : values; }
 function isLfoDestination(i) { return page >= 4 && i === 0; }
-function destinationIndex(value) { return Math.max(0, Math.min(6, Math.floor(value / 16))); }
+function destinationIndex(value) { return Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value))); }
 function displayValue(i, value) {
     return isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
         : `${value}`.padStart(3, '0');
@@ -94,7 +104,7 @@ function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
     const target = activeValues();
     const v = isLfoDestination(i)
-        ? Math.max(0, Math.min(6, destinationIndex(target[i]) + delta)) * 16
+        ? Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + delta))
         : Math.max(0, Math.min(127, target[i] + delta));
     if (v === target[i]) return;
     target[i] = v;

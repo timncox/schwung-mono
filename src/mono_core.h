@@ -12,6 +12,7 @@
 #define MONO_ALT_PARAMS 8
 #define MONO_ALT_BASE MONO_PRIMARY_PARAMS
 #define MONO_PARAMS (MONO_PRIMARY_PARAMS + MONO_ALT_PARAMS)
+#define MONO_LFO_DESTINATIONS (MONO_PARAMS + 2) /* Off, Pitch, then every param */
 
 typedef enum {
     MONO_SWAVE_SAW = 0,

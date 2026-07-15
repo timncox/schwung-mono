@@ -134,17 +134,75 @@ static void test_parameter_aliases(void) {
     assert(get_int(m, "syn3") == 99);
     mono_set_param(m, "machine", "4");
     assert(get_int(m, "machine") == 4);
-    mono_set_param(m, "lfo1_1", "3");
-    assert(get_int(m, "lfo1_1") == 3);
+    mono_set_param(m, "lfo1_1", "18");
+    assert(get_int(m, "lfo1_1") == 18);
     mono_set_param(m, "page", "4");
-    assert(get_int(m, "p1") == 48);
-    mono_set_param(m, "p1", "96");
-    assert(get_int(m, "lfo1_1") == 6);
+    assert(get_int(m, "p1") == 18);
+    mono_set_param(m, "p1", "30");
+    assert(get_int(m, "lfo1_1") == 30);
     mono_set_param(m, "syn9", "73");
     assert(get_int(m, "alt1") == 73);
     mono_set_param(m, "alt8", "19");
     assert(get_int(m, "syn16") == 19);
     mono_destroy(m);
+}
+
+static void test_all_lfo_destinations_round_trip(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "page", "4");
+    for (int destination = 0; destination < MONO_LFO_DESTINATIONS; ++destination) {
+        char value[16];
+        snprintf(value, sizeof(value), "%d", destination);
+        mono_set_param(m, "lfo1_1", value);
+        assert(get_int(m, "lfo1_1") == destination);
+        assert(get_int(m, "p1") == destination);
+    }
+    mono_set_param(m, "lfo1_1", "127");
+    assert(get_int(m, "lfo1_1") == MONO_LFO_DESTINATIONS - 1);
+    mono_destroy(m);
+}
+
+static void configure_cross_lfo(mono_t *m, int cross_depth) {
+    char depth[16];
+    snprintf(depth, sizeof(depth), "%d", cross_depth);
+    mono_set_param(m, "flt1", "52");
+    mono_set_param(m, "flt2", "50");
+    mono_set_param(m, "lfo1_1", "46"); /* LFO 2 Speed (pid 44). */
+    mono_set_param(m, "lfo1_3", "32");
+    mono_set_param(m, "lfo1_5", "80");
+    mono_set_param(m, "lfo1_7", depth);
+    mono_set_param(m, "lfo2_1", "18"); /* Filter Base (pid 16). */
+    mono_set_param(m, "lfo2_3", "64");
+    mono_set_param(m, "lfo2_5", "24");
+    mono_set_param(m, "lfo2_7", "100");
+    mono_note_on(m, 0, 48, 112);
+}
+
+static void test_lfo_can_modulate_lfo_settings(void) {
+    mono_t *plain = mono_create(&host, 1);
+    mono_t *cross = mono_create(&host, 1);
+    assert(plain && cross);
+    configure_cross_lfo(plain, 0);
+    configure_cross_lfo(cross, 127);
+    assert(render_hash_long(plain) != render_hash_long(cross));
+    mono_destroy(plain);
+    mono_destroy(cross);
+
+    mono_t *self = mono_create(&host, 1);
+    assert(self);
+    mono_set_param(self, "lfo1_1", "34"); /* LFO 1 Destination itself. */
+    mono_set_param(self, "lfo1_7", "127");
+    mono_note_on(self, 0, 48, 112);
+    assert(render_energy(self, 400) > 1000);
+    char debug[256];
+    unsigned notes, blocks, nonzero, nonfinite;
+    int peak, lifetime;
+    get_string(self, "debug", debug, sizeof(debug));
+    assert(sscanf(debug, "%u:%d:%d:%u:%u:%u", &notes, &peak, &lifetime,
+                  &blocks, &nonzero, &nonfinite) == 6);
+    assert(nonfinite == 0);
+    mono_destroy(self);
 }
 
 static void test_shift_layer_controls_are_audible(void) {
@@ -335,7 +393,7 @@ static void test_full_state_round_trip(void) {
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":3"));
+    assert(strstr(state, "\"v\":4"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -372,6 +430,30 @@ static void test_full_state_round_trip(void) {
 
     mono_set_param(restored, "state", "{\"v\":2,\"data\":\"T0BAD\"}");
     assert(get_int(restored, "machine") == 5); /* malformed snapshots are ignored */
+    mono_destroy(source);
+    mono_destroy(restored);
+}
+
+static void test_v3_lfo_destinations_migrate(void) {
+    mono_t *source = mono_create(&host, 1);
+    mono_t *restored = mono_create(&host, 1);
+    assert(source && restored);
+    char state[4096];
+    assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
+    char *version = strstr(state, "\"v\":4");
+    char *data = strstr(state, "\"data\":\"");
+    assert(version && data);
+    version[4] = '3';
+    data += strlen("\"data\":\"");
+    assert(!strncmp(data, "T000", 4));
+    memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
+    memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
+    memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
+
+    mono_set_param(restored, "state", state);
+    assert(get_int(restored, "lfo1_1") == 1);
+    assert(get_int(restored, "lfo2_1") == 18);
+    assert(get_int(restored, "lfo3_1") == 30);
     mono_destroy(source);
     mono_destroy(restored);
 }
@@ -465,6 +547,8 @@ int main(void) {
     test_note_release();
     test_filters_remain_finite_and_retrigger();
     test_parameter_aliases();
+    test_all_lfo_destinations_round_trip();
+    test_lfo_can_modulate_lfo_settings();
     test_shift_layer_controls_are_audible();
     test_sequencer_and_lock();
     test_internal_clock();
@@ -473,6 +557,7 @@ int main(void) {
     test_production_event_paths();
     test_remote_state_contract();
     test_full_state_round_trip();
+    test_v3_lfo_destinations_migrate();
     test_v2_presets_receive_machine_shift_defaults();
     test_dense_pattern_fits_host_state_limit();
     test_maximum_lock_state_fits_overtake_channel();

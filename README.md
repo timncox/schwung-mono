@@ -33,8 +33,10 @@ On the SYNTH page, hold Shift while turning knobs 1–8 to open the secondary
 machine layer. The first four controls are machine-specific; the last four are
 Drift, Fold, Bits, and Noise. Shift + jog continues to change machines.
 
-LFO destination is a named seven-choice control: Off, Pitch, Filter Base,
-Filter Width, Volume, Pan, or Delay.
+Each LFO has 66 named destinations: Off, Pitch, and every one of the 64 sound
+parameters. That includes the synthesis and Shift layers, envelopes, filters,
+effects, and every setting on all three LFOs. LFO-to-LFO and self-modulation
+use a bounded one-sample feedback path so recursive routings stay stable.
 
 ## Saving and recall
 

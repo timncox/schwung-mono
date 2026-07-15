@@ -2,7 +2,7 @@
   "id": "mono-voice",
   "name": "Mono Voice",
   "abbrev": "MONV",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Monomachine-inspired digital machine voice: SuperWave, SID, DigiPRO and FM",
   "dsp": "dsp.so",
   "ui_chain": "ui_chain.js",
@@ -104,7 +104,7 @@
         "lfo1": {
           "name":"LFO 1",
           "params":[
-            {"key":"lfo1_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
+            {"key":"lfo1_1","name":"Destination","type":"enum","options":["Off","Pitch","Synth 1","Synth 2","Synth 3","Synth 4","Synth 5","Synth 6","Synth 7","Tune","Amp Attack","Amp Hold","Amp Decay","Amp Release","Distortion","Volume","Pan","Portamento","Filter Base","Filter Width","HP Resonance","LP Resonance","Filter Attack","Filter Decay","Env Base","Env Width","EQ Frequency","EQ Gain","Sample Rate","Delay Send","Delay Time","Delay Feedback","Delay Base","Delay Width","LFO 1 Destination","LFO 1 Trigger","LFO 1 Wave","LFO 1 Multiplier","LFO 1 Speed","LFO 1 Interlace","LFO 1 Depth","LFO 1 Phase","LFO 2 Destination","LFO 2 Trigger","LFO 2 Wave","LFO 2 Multiplier","LFO 2 Speed","LFO 2 Interlace","LFO 2 Depth","LFO 2 Phase","LFO 3 Destination","LFO 3 Trigger","LFO 3 Wave","LFO 3 Multiplier","LFO 3 Speed","LFO 3 Interlace","LFO 3 Depth","LFO 3 Phase","Alt 1","Alt 2","Alt 3","Alt 4","Drift","Fold","Bit Depth","Noise"],"default":0},
             {"key":"lfo1_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo1_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo1_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
@@ -118,7 +118,7 @@
         "lfo2": {
           "name":"LFO 2",
           "params":[
-            {"key":"lfo2_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
+            {"key":"lfo2_1","name":"Destination","type":"enum","options":["Off","Pitch","Synth 1","Synth 2","Synth 3","Synth 4","Synth 5","Synth 6","Synth 7","Tune","Amp Attack","Amp Hold","Amp Decay","Amp Release","Distortion","Volume","Pan","Portamento","Filter Base","Filter Width","HP Resonance","LP Resonance","Filter Attack","Filter Decay","Env Base","Env Width","EQ Frequency","EQ Gain","Sample Rate","Delay Send","Delay Time","Delay Feedback","Delay Base","Delay Width","LFO 1 Destination","LFO 1 Trigger","LFO 1 Wave","LFO 1 Multiplier","LFO 1 Speed","LFO 1 Interlace","LFO 1 Depth","LFO 1 Phase","LFO 2 Destination","LFO 2 Trigger","LFO 2 Wave","LFO 2 Multiplier","LFO 2 Speed","LFO 2 Interlace","LFO 2 Depth","LFO 2 Phase","LFO 3 Destination","LFO 3 Trigger","LFO 3 Wave","LFO 3 Multiplier","LFO 3 Speed","LFO 3 Interlace","LFO 3 Depth","LFO 3 Phase","Alt 1","Alt 2","Alt 3","Alt 4","Drift","Fold","Bit Depth","Noise"],"default":0},
             {"key":"lfo2_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo2_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo2_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},
@@ -132,7 +132,7 @@
         "lfo3": {
           "name":"LFO 3",
           "params":[
-            {"key":"lfo3_1","name":"Destination","type":"enum","options":["Off","Pitch","Filter Base","Filter Width","Volume","Pan","Delay"],"default":0},
+            {"key":"lfo3_1","name":"Destination","type":"enum","options":["Off","Pitch","Synth 1","Synth 2","Synth 3","Synth 4","Synth 5","Synth 6","Synth 7","Tune","Amp Attack","Amp Hold","Amp Decay","Amp Release","Distortion","Volume","Pan","Portamento","Filter Base","Filter Width","HP Resonance","LP Resonance","Filter Attack","Filter Decay","Env Base","Env Width","EQ Frequency","EQ Gain","Sample Rate","Delay Send","Delay Time","Delay Feedback","Delay Base","Delay Width","LFO 1 Destination","LFO 1 Trigger","LFO 1 Wave","LFO 1 Multiplier","LFO 1 Speed","LFO 1 Interlace","LFO 1 Depth","LFO 1 Phase","LFO 2 Destination","LFO 2 Trigger","LFO 2 Wave","LFO 2 Multiplier","LFO 2 Speed","LFO 2 Interlace","LFO 2 Depth","LFO 2 Phase","LFO 3 Destination","LFO 3 Trigger","LFO 3 Wave","LFO 3 Multiplier","LFO 3 Speed","LFO 3 Interlace","LFO 3 Depth","LFO 3 Phase","Alt 1","Alt 2","Alt 3","Alt 4","Drift","Fold","Bit Depth","Noise"],"default":0},
             {"key":"lfo3_2","name":"Trigger","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo3_3","name":"Wave","type":"int","min":0,"max":127,"default":0},
             {"key":"lfo3_4","name":"Multiplier","type":"int","min":0,"max":127,"default":32},

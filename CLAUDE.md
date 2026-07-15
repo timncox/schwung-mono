@@ -49,6 +49,12 @@ milestones.
 - 4-6 LFO 1-3: destination, trigger mode, waveform, multiplier, speed,
   interlace, depth, phase.
 
+Each LFO destination is a direct 0-65 enum: Off, Pitch, then parameter IDs
+0-63. Modulation of LFO parameters is fed into the following sample and
+clamped, allowing cross- and self-modulation without recursive evaluation.
+State v4 stores this direct map; v2/v3 seven-destination presets migrate on
+load.
+
 The sound-generator manifest exposes stable `synN`, `ampN`, `fltN`, `fxN`,
 and `lfoX_N` keys. Secondary synthesis controls use stable `syn9`...`syn16`
 and `alt1`...`alt8` aliases. The overtake UI exposes the selected page through

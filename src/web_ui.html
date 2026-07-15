@@ -123,7 +123,17 @@
 "use strict";
 const MACHINES = ["SW SAW","SW PULSE","SW ENS","SID 6581","DIGIPRO","FM+STAT"];
 const PAGES = ["SYNTH","AMP","FILTER","EFFECT","LFO 1","LFO 2","LFO 3"];
-const LFO_DESTS = ["OFF","PITCH","FILTER BASE","FILTER WIDTH","VOLUME","PAN","DELAY"];
+const LFO_DESTS = [
+  "OFF","PITCH",
+  "SYNTH 1","SYNTH 2","SYNTH 3","SYNTH 4","SYNTH 5","SYNTH 6","SYNTH 7","TUNE",
+  "AMP ATTACK","AMP HOLD","AMP DECAY","AMP RELEASE","DISTORTION","VOLUME","PAN","PORTAMENTO",
+  "FILTER BASE","FILTER WIDTH","HP RESONANCE","LP RESONANCE","FILTER ATTACK","FILTER DECAY","ENV BASE","ENV WIDTH",
+  "EQ FREQUENCY","EQ GAIN","SAMPLE RATE","DELAY SEND","DELAY TIME","DELAY FEEDBACK","DELAY BASE","DELAY WIDTH",
+  "LFO 1 DEST","LFO 1 TRIGGER","LFO 1 WAVE","LFO 1 MULT","LFO 1 SPEED","LFO 1 INTERLACE","LFO 1 DEPTH","LFO 1 PHASE",
+  "LFO 2 DEST","LFO 2 TRIGGER","LFO 2 WAVE","LFO 2 MULT","LFO 2 SPEED","LFO 2 INTERLACE","LFO 2 DEPTH","LFO 2 PHASE",
+  "LFO 3 DEST","LFO 3 TRIGGER","LFO 3 WAVE","LFO 3 MULT","LFO 3 SPEED","LFO 3 INTERLACE","LFO 3 DEPTH","LFO 3 PHASE",
+  "ALT 1","ALT 2","ALT 3","ALT 4","DRIFT","FOLD","BIT DEPTH","NOISE"
+];
 const COMMON = [null,
   ["ATK","HOLD","DEC","REL","DIST","VOL","PAN","PORT"],
   ["BASE","WIDTH","HP Q","LP Q","F ATK","F DEC","F BASE","F WIDTH"],
@@ -162,7 +172,7 @@ const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[k
 const labels = () => number("page") === 0 ? (altLayer ? SYNTH_SHIFT[number("machine")] : SYNTH[number("machine")]) : COMMON[number("page")];
 const controlKey = i => number("page") === 0 && altLayer ? `alt${i+1}` : `p${i+1}`;
 const isLfoDestination = i => number("page") >= 4 && i === 0;
-const destinationIndex = value => Math.max(0,Math.min(6,Math.floor(Number(value)/16)));
+const destinationIndex = value => Math.max(0,Math.min(LFO_DESTS.length-1,Math.round(Number(value))));
 const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)] : String(value).padStart(3,"0");
 function send(key, value) {
   if (!PREFIX) return false;
@@ -241,7 +251,7 @@ function render() {
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
   el("layerSection").hidden=page!==0;el("layer").textContent=altLayer?"SHIFT / SECONDARY":"MAIN";el("layer").classList.toggle("active",altLayer);
-  const names=labels(); for(let i=0;i<8;i++){const slider=el(`p${i+1}`),dest=isLfoDestination(i),key=controlKey(i),value=number(key);slider.max=dest?96:127;slider.step=dest?16:1;el(`label${i}`).textContent=names[i];syncRange(`p${i+1}`,value,`value${i}`,key);el(`value${i}`).value=displayValue(i,value);}
+  const names=labels(); for(let i=0;i<8;i++){const slider=el(`p${i+1}`),dest=isLfoDestination(i),key=controlKey(i),value=number(key);slider.max=dest?LFO_DESTS.length-1:127;slider.step=1;el(`label${i}`).textContent=names[i];syncRange(`p${i+1}`,value,`value${i}`,key);el(`value${i}`).value=displayValue(i,value);}
   syncRange("master",number("master",100),"masterValue");
   const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});

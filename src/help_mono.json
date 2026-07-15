@@ -68,8 +68,10 @@
         "knob for its second",
         "machine layer.",
         "",
-        "LFO DEST shows its",
-        "target by name."
+        "LFO DEST names all",
+        "64 sound params plus",
+        "Pitch. LFOs can",
+        "modulate each other."
       ]
     },
     {
