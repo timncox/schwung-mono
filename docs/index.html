@@ -824,7 +824,7 @@
           <div class="start-step"><div><b>Launch Mono</b><span>Open the Schwung overtake module named <code>mono</code>.</span></div></div>
           <div class="start-step"><div><b>Choose a track</b><span>Press one of the first six pads on the top row. Track 1 is selected at startup.</span></div></div>
           <div class="start-step"><div><b>Choose a machine</b><span>Press top-row pad 7 to move forward. Hold <kbd>Shift</kbd> while pressing it to move backward.</span></div></div>
-          <div class="start-step"><div><b>Play and sequence</b><span>Play the lower three pad rows, tap step keys to add trigs, then press top-row pad 8.</span></div></div>
+          <div class="start-step"><div><b>Play and sequence</b><span>Play a note on the lower three pad rows, tap a step key to place that note, then press top-row pad 8.</span></div></div>
         </div>
       </div>
       <div class="mode-content" id="mode-voice" role="tabpanel" aria-labelledby="tab-voice" hidden>
@@ -873,6 +873,7 @@
           <button type="button" data-inspect="voice">Mono Voice differences</button>
         </div>
       </div>
+      <div class="warning"><b>Sequence Setup</b><span>Hold <kbd>Shift</kbd> and press top-row pad 8. Knobs 1–4 become Start, Length, Order, and visible Page. Choose Forward, Reverse, Pendulum, or Random; tap a Step key in this view to set the start directly. Press Back or Shift + pad 8 to return.</span></div>
     </div>
   </section>
 
@@ -902,7 +903,7 @@
       <div class="lock-workflow">
         <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine, every sound parameter, and Mono's live automation locks.</p></div>
         <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips, track state, and Mono Voice automation.</p></div>
-        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, and parameter locks return.</p></div>
+        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, playback window, order, and parameter locks return.</p></div>
       </div>
     </div>
   </section>
@@ -989,11 +990,12 @@
           <h3>Mono / full surface</h3>
           <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks.</span></div>
           <div class="ref-row"><b>Top pad 7</b><span>Next machine. <kbd>Shift</kbd> + pad selects the previous machine.</span></div>
-          <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer.</span></div>
+          <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer. <kbd>Shift</kbd> + pad 8 opens Sequence Setup.</span></div>
           <div class="ref-row"><b>Lower 24 pads</b><span>Chromatic keyboard for the selected track, starting at MIDI note 48.</span></div>
           <div class="ref-row"><b>Remote audition keys</b><span>Play MIDI notes 48–60 on the selected Mono track. The large label is the note; the small A–K label is its optional computer-key shortcut. A click is held long enough to be audible. If the Remote UI says it is waiting, select another Slot tab and return to reconnect it.</span></div>
           <div class="ref-row"><b>Step keys</b><span>Tap to toggle trigs; hold while turning a knob to lock it.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Select steps 1–16, 17–32, 33–48, or 49–64.</span></div>
+          <div class="ref-row"><b>Sequence Setup</b><span>Knobs 1–4 set playback start, length, Forward/Reverse/Pendulum/Random order, and visible step page. Tap a Step key to choose the start.</span></div>
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>On SYNTH, edit the selected machine's secondary eight-control layer.</span></div>
@@ -1143,7 +1145,7 @@
   const padData = [];
   for (let i = 0; i < 6; i++) padData.push({ label: `Track ${i + 1}`, cls: 'track' + (i === 0 ? ' active' : ''), title: `TRACK ${i + 1}`, copy: `Selects synth track ${i + 1}. The selected track owns its own machine, sound settings, and 64-step pattern.` });
   padData.push({ label: 'Machine +', cls: 'machine', title: 'NEXT MACHINE', copy: 'Cycles forward through the six synthesis machines. Hold Shift while pressing to cycle backward.' });
-  padData.push({ label: 'Play / stop', cls: 'play', title: 'TRANSPORT', copy: 'Starts or stops Mono’s internal six-track sequencer.' });
+  padData.push({ label: 'Play / setup', cls: 'play', title: 'TRANSPORT', copy: 'Starts or stops Mono’s internal six-track sequencer. Hold Shift while pressing to open Sequence Setup for start, length, order, and page.' });
   for (let i = 0; i < 24; i++) padData.push({ label: `Note ${48 + i}`, cls: 'note', title: `MIDI NOTE ${48 + i}`, copy: 'Plays the selected track chromatically. The lower three pad rows cover 24 consecutive notes.' });
   padData.forEach((data, i) => {
     const button = document.createElement('button');
@@ -1179,7 +1181,7 @@
   const inspectExtras = {
     jog: ['NAVIGATION', 'JOG', 'PARAMETER PAGE', 'Turn the jog wheel to cycle through SYNTH, AMP, FILTER, EFFECT, LFO 1, LFO 2, and LFO 3.'],
     arrows: ['SEQUENCER', '← / →', 'STEP PAGE', 'Select one of four 16-step pages: 1–16, 17–32, 33–48, or 49–64.'],
-    shift: ['MODIFIER', 'SHIFT', 'SECONDARY SYNTH', 'On SYNTH, Shift plus knobs edits eight additional machine controls. Shift plus jog changes machine. While holding a step, Shift plus a knob turn removes that parameter lock.'],
+    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On SYNTH, Shift plus knobs edits eight additional machine controls. Shift plus jog changes machine. Shift plus top-row pad 8 opens Sequence Setup. While holding a step, Shift plus a knob turn removes that parameter lock.'],
     voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages; Shift plus jog changes the machine.']
   };
   document.querySelectorAll('[data-inspect]').forEach(button => button.addEventListener('click', () => inspect(...inspectExtras[button.dataset.inspect])));

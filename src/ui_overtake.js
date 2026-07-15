@@ -45,6 +45,8 @@ const LFO_TRIGGER_NAMES = ['Free', 'Retrigger', 'Hold', 'One Shot', 'Half Shot']
 const LFO_TRIGGER_SCREEN = ['FREE', 'TRIG', 'HOLD', 'ONE', 'HALF'];
 const LFO_WAVE_NAMES = ['Sine', 'Saw', 'Triangle', 'Square', 'Random'];
 const LFO_WAVE_SCREEN = ['SINE', 'SAW', 'TRI', 'SQR', 'RAND'];
+const PLAY_ORDERS = ['FORWARD', 'REVERSE', 'PENDULUM', 'RANDOM'];
+const PLAY_ORDER_SCREEN = ['FWD', 'REV', 'PEND', 'RAND'];
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -79,13 +81,15 @@ const SAVE_ROW = '[Save current...]';
 
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let recordArmed = false;
-let patternLen = 16, playStep = -1, shift = false, tickCount = 0;
+let patternStart = 0, patternLen = 16, playOrder = 0, playStep = -1;
+let shift = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let altValues = new Array(8).fill(0);
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
 let focusBank = 0;
 let presetMode = false, presetIndex = 0, presets = [];
+let seqSetup = false;
 
 function gp(key) {
     const v = host_module_get_param(key);
@@ -229,6 +233,9 @@ function fetchAll() {
     playStep = parseInt(p[1], 10);
     patternLen = parseInt(p[6], 10) || 16;
     recordArmed = parseInt(p[7] || gp('record') || '0', 10) !== 0;
+    patternStart = Math.max(0, Math.min(63, parseInt(p[8] || gp('pattern_start') || '0', 10) || 0));
+    playOrder = Math.max(0, Math.min(PLAY_ORDERS.length - 1,
+        parseInt(p[9] || gp('play_order') || '0', 10) || 0));
     machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
@@ -256,6 +263,48 @@ function setStepPage(next) {
     host_module_set_param('step_page', `${stepPage}`);
     parseSteps(); paintSteps(false); needsRedraw = true;
     announce(`Steps ${stepPage * 16 + 1} to ${stepPage * 16 + 16}`);
+}
+
+function openSeqSetup() {
+    seqSetup = true;
+    heldStep = null;
+    fetchAll();
+    paintSteps(false);
+    needsRedraw = true;
+    announce('Sequence setup');
+}
+
+function closeSeqSetup() {
+    seqSetup = false;
+    paintAll(true);
+    needsRedraw = true;
+    announceView('Mono');
+}
+
+function setPatternStart(next) {
+    host_module_set_param('pattern_start', `${Math.max(0, Math.min(63, next))}`);
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announceParameter('Sequence start', `${patternStart + 1}`);
+}
+
+function setPatternLength(next) {
+    host_module_set_param('pattern_len', `${Math.max(1, Math.min(64 - patternStart, next))}`);
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announceParameter('Sequence length', `${patternLen}`);
+}
+
+function setPlayOrder(next) {
+    playOrder = Math.max(0, Math.min(PLAY_ORDERS.length - 1, next));
+    host_module_set_param('play_order', `${playOrder}`);
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announceParameter('Play order', PLAY_ORDERS[playOrder]);
+}
+
+function adjustSeqSetup(i, delta) {
+    if (i === 0) setPatternStart(patternStart + delta);
+    else if (i === 1) setPatternLength(patternLen + delta);
+    else if (i === 2) setPlayOrder(playOrder + delta);
+    else if (i === 3) setStepPage(stepPage + delta);
 }
 
 function cycleMachine(delta) {
@@ -323,6 +372,15 @@ function paintSteps(force) {
     const localPlay = playStep >= stepPage * 16 && playStep < stepPage * 16 + 16
         ? playStep - stepPage * 16 : -1;
     for (let i = 0; i < 16; i++) {
+        const absolute = stepPage * 16 + i;
+        if (seqSetup) {
+            const inWindow = absolute >= patternStart && absolute < patternStart + patternLen;
+            let c = inWindow ? Green : 0x10;
+            if (absolute === patternStart) c = White;
+            if (absolute === playStep) c = BrightRed;
+            setLED(STEP_FIRST + i, c, force);
+            continue;
+        }
         let c = steps[i] === 2 ? Purple : (steps[i] === 1 ? BrightRed : Black);
         if (i === localPlay) c = White;
         if (heldStep && heldStep.step === stepPage * 16 + i) c = BrightGreen;
@@ -367,6 +425,23 @@ function drawPresetBrowser() {
     needsRedraw = false;
 }
 
+function drawSeqSetup() {
+    clear_screen();
+    drawHeader('MONO · SEQ SETUP');
+    const labels = ['START', 'LENGTH', 'ORDER', 'PAGE'];
+    const shown = [String(patternStart + 1).padStart(2, '0'),
+        String(patternLen).padStart(2, '0'), PLAY_ORDER_SCREEN[playOrder],
+        `${stepPage + 1}/4`];
+    for (let i = 0; i < 4; i++) {
+        const x = i * 32 + 2;
+        print(x, 18, labels[i], 1);
+        print(x, 34, shown[i], 1);
+    }
+    drawFooter({left: `END ${String(patternStart + patternLen).padStart(2, '0')}`,
+                right: 'Step=start · Back'});
+    needsRedraw = false;
+}
+
 globalThis.init = function() {
     host_module_set_param('track', '0');
     host_module_set_param('page', '0');
@@ -392,13 +467,22 @@ globalThis.tick = function() {
         needsRedraw = true;
     }
     if (resumePaints > 0 && tickCount % 8 === 0) { paintAll(true); resumePaints--; }
-    if (needsRedraw) presetMode ? drawPresetBrowser() : draw();
+    if (needsRedraw) presetMode ? drawPresetBrowser() : (seqSetup ? drawSeqSetup() : draw());
 };
 
 globalThis.onMidiMessageInternal = function(data) {
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
+        if (seqSetup) {
+            if (d1 === MoveBack && d2 > 0) { closeSeqSetup(); return; }
+            if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
+            if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
+            if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 4) {
+                const d = decodeDelta(d2); if (d) adjustSeqSetup(d1 - MoveKnob1, d); return;
+            }
+            return;
+        }
         if (presetMode) {
             if (d1 === MoveMainKnob) {
                 const d = decodeDelta(d2);
@@ -451,13 +535,27 @@ globalThis.onMidiMessageInternal = function(data) {
     }
 
     if (status === 0x90 && d2 > 0) {
+        if (seqSetup) {
+            if (d1 >= STEP_FIRST && d1 < STEP_FIRST + STEP_COUNT) {
+                setPatternStart(stepPage * 16 + d1 - STEP_FIRST);
+                return;
+            }
+            if (d1 === PAD_TRANSPORT) {
+                shiftActive() ? closeSeqSetup() : toggleTransport();
+                return;
+            }
+            return;
+        }
         if (d1 >= STEP_FIRST && d1 < STEP_FIRST + STEP_COUNT) {
             heldStep = {step: stepPage * 16 + d1 - STEP_FIRST, used: false};
             paintSteps(false); needsRedraw = true; return;
         }
         for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) { selectTrack(i); return; }
         if (d1 === PAD_MACHINE) { cycleMachine(shiftActive() ? -1 : 1); return; }
-        if (d1 === PAD_TRANSPORT) { toggleTransport(); return; }
+        if (d1 === PAD_TRANSPORT) {
+            shiftActive() ? openSeqSetup() : toggleTransport();
+            return;
+        }
         if (d1 >= 68 && d1 < 92) return;
     }
 };

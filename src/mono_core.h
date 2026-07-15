@@ -24,6 +24,14 @@ typedef enum {
     MONO_MACHINE_COUNT
 } mono_machine_t;
 
+typedef enum {
+    MONO_PLAY_FORWARD = 0,
+    MONO_PLAY_REVERSE,
+    MONO_PLAY_PENDULUM,
+    MONO_PLAY_RANDOM,
+    MONO_PLAY_MODE_COUNT
+} mono_play_mode_t;
+
 typedef struct mono mono_t;
 
 mono_t *mono_create(const host_api_v1_t *host, int track_count);

@@ -92,6 +92,7 @@ scripts/deploy.sh
 - Top-row pads 1-6: select track
 - Top-row pad 7: cycle machine; Shift reverses direction
 - Top-row pad 8: start/stop internal sequencer
+- Shift + top-row pad 8: open Sequence Setup
 - Lower three pad rows: chromatic performance keyboard
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
@@ -100,6 +101,12 @@ scripts/deploy.sh
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
 - Move Record: arm/disarm live knob-lock recording during playback
+
+Sequence Setup keeps the pattern controls off the sound-editing screen. Knob 1
+sets the first played step, knob 2 sets the window length, knob 3 selects
+Forward/Reverse/Pendulum/Random order, and knob 4 selects the visible 16-step
+page. The Remote UI shows all 64 steps together and dims steps outside the
+saved playback window.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's

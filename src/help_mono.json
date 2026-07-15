@@ -42,6 +42,22 @@
       ]
     },
     {
+      "title": "Play Window",
+      "lines": [
+        "Shift + top pad 8",
+        "opens Seq Setup.",
+        "",
+        "Knob 1: start.",
+        "Knob 2: length.",
+        "Knob 3: order.",
+        "Knob 4: step page.",
+        "",
+        "Orders are Forward,",
+        "Reverse, Pendulum",
+        "and Random."
+      ]
+    },
+    {
       "title": "Locks",
       "lines": [
         "Hold a step and",
@@ -92,7 +108,8 @@
         "",
         "Save current keeps",
         "all 6 sounds, 64",
-        "steps and locks."
+        "steps, play window,",
+        "order and locks."
       ]
     }
   ]

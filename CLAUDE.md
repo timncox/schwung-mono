@@ -84,6 +84,14 @@ cleared on recall. Render-time smoothing applies a 30 ms one-pole glide to
 continuous targets. Waveform/routing/mode enums stay stepped, and smoothing
 uses separate targets so LFO cross-modulation never mutates saved parameters.
 
+Full Mono also exposes a saved playback window over the 64 stored steps.
+`pattern_start` is zero-based, `pattern_len` is clamped so the window ends by
+step 64, and `play_order` selects Forward, Reverse, Pendulum, or Random. Order
+changes restart traversal on the following sequencer tick; Pendulum does not
+repeat its end points. The Move UI edits these settings in a separate Sequence
+Setup view, while `all_steps` gives Remote UI one 64-value overview without
+changing `step_page` or causing editor remounts.
+
 ## Fidelity boundary
 
 The public manual documents topology and control intent but not the original

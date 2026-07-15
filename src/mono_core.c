@@ -102,10 +102,14 @@ struct mono {
     int selected_track;
     int selected_page;
     int step_page;
+    int pattern_start;
     int pattern_len;
+    int play_order;
     int transport;
     int record_locks;
     int seq_step;
+    int seq_direction;
+    uint32_t seq_rng;
     int tick_in_step;
     int external_clock;
     int external_clock_age;
@@ -354,8 +358,12 @@ mono_t *mono_create(const host_api_v1_t *host, int track_count) {
     m->host = host;
     m->sample_rate = host && host->sample_rate > 0 ? host->sample_rate : MOVE_SAMPLE_RATE;
     m->track_count = iclamp(track_count, 1, MONO_MAX_TRACKS);
+    m->pattern_start = 0;
     m->pattern_len = 16;
+    m->play_order = MONO_PLAY_FORWARD;
     m->seq_step = -1;
+    m->seq_direction = 1;
+    m->seq_rng = 0x51f15e5du;
     m->master = m->track_count > 1 ? 0.34f : 0.7f;
     m->smooth_coeff = 1.0f - expf(-1.0f / (0.030f * m->sample_rate));
     generate_wavetables(m);
@@ -940,7 +948,38 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
 
 void mono_advance_step(mono_t *m) {
     if (!m) return;
-    m->seq_step = (m->seq_step + 1) % m->pattern_len;
+    int first = m->pattern_start;
+    int end = first + m->pattern_len;
+    if (m->seq_step < first || m->seq_step >= end) {
+        if (m->play_order == MONO_PLAY_REVERSE)
+            m->seq_step = end - 1;
+        else if (m->play_order == MONO_PLAY_RANDOM)
+            m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)m->pattern_len);
+        else {
+            m->seq_step = first;
+            m->seq_direction = 1;
+        }
+    } else if (m->play_order == MONO_PLAY_REVERSE) {
+        if (--m->seq_step < first) m->seq_step = end - 1;
+    } else if (m->play_order == MONO_PLAY_PENDULUM) {
+        if (m->pattern_len <= 1) {
+            m->seq_step = first;
+        } else {
+            int next = m->seq_step + m->seq_direction;
+            if (next >= end) {
+                m->seq_direction = -1;
+                next = end - 2;
+            } else if (next < first) {
+                m->seq_direction = 1;
+                next = first + 1;
+            }
+            m->seq_step = next;
+        }
+    } else if (m->play_order == MONO_PLAY_RANDOM) {
+        m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)m->pattern_len);
+    } else {
+        if (++m->seq_step >= end) m->seq_step = first;
+    }
     for (int ti = 0; ti < m->track_count; ++ti) {
         mono_track_t *t = &m->track[ti];
         mono_step_t *s = &t->steps[m->seq_step];
@@ -1019,6 +1058,7 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
     if (st == 0xFA) {
         m->transport = 1;
         m->seq_step = -1;
+        m->seq_direction = 1;
         m->tick_in_step = 0;
         m->internal_frames = 0;
         mono_advance_step(m);
@@ -1230,8 +1270,12 @@ static void restore_state(mono_t *m, const char *json) {
     m->selected_page = iclamp(json_int(json, "\"page\":", 0),
                               0, MONO_PAGES - 1);
     m->step_page = iclamp(json_int(json, "\"step_page\":", 0), 0, 3);
+    m->pattern_start = iclamp(json_int(json, "\"pattern_start\":", 0),
+                              0, MONO_STEPS - 1);
     m->pattern_len = iclamp(json_int(json, "\"pattern_len\":", 16),
-                            1, MONO_STEPS);
+                            1, MONO_STEPS - m->pattern_start);
+    m->play_order = iclamp(json_int(json, "\"play_order\":", MONO_PLAY_FORWARD),
+                           MONO_PLAY_FORWARD, MONO_PLAY_MODE_COUNT - 1);
     m->master = fclamp(json_float(json, "\"master\":", 100.0f) / 100.0f,
                        0.0f, 2.0f);
     m->bpm_override = fclamp(json_float(json, "\"bpm_override\":", 0.0f),
@@ -1239,6 +1283,7 @@ static void restore_state(mono_t *m, const char *json) {
     m->transport = 0;
     m->record_locks = 0;
     m->seq_step = -1;
+    m->seq_direction = 1;
     m->tick_in_step = 0;
     m->external_clock = 0;
     m->external_clock_age = 0;
@@ -1283,13 +1328,35 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!strcmp(key, "track")) { m->selected_track = iclamp(v, 0, m->track_count - 1); changed(m); return; }
     if (!strcmp(key, "page")) { m->selected_page = iclamp(v, 0, MONO_PAGES - 1); changed(m); return; }
     if (!strcmp(key, "step_page")) { m->step_page = iclamp(v, 0, 3); changed(m); return; }
-    if (!strcmp(key, "pattern_len")) { m->pattern_len = iclamp(v, 1, MONO_STEPS); changed(m); return; }
+    if (!strcmp(key, "pattern_start")) {
+        m->pattern_start = iclamp(v, 0, MONO_STEPS - 1);
+        m->pattern_len = iclamp(m->pattern_len, 1, MONO_STEPS - m->pattern_start);
+        if (m->seq_step < m->pattern_start ||
+            m->seq_step >= m->pattern_start + m->pattern_len) m->seq_step = -1;
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "pattern_len")) {
+        m->pattern_len = iclamp(v, 1, MONO_STEPS - m->pattern_start);
+        if (m->seq_step < m->pattern_start ||
+            m->seq_step >= m->pattern_start + m->pattern_len) m->seq_step = -1;
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "play_order")) {
+        m->play_order = iclamp(v, MONO_PLAY_FORWARD, MONO_PLAY_MODE_COUNT - 1);
+        m->seq_step = -1;
+        m->seq_direction = 1;
+        changed(m);
+        return;
+    }
     if (!strcmp(key, "bpm_override")) { m->bpm_override = fclamp(strtof(val, NULL), 0, 400); changed(m); return; }
     if (!strcmp(key, "master")) { m->master = fclamp(strtof(val, NULL) / 100.0f, 0, 2); changed(m); return; }
     if (!strcmp(key, "record")) { m->record_locks = v != 0; changed(m); return; }
     if (!strcmp(key, "transport")) {
         if (v && !m->transport) {
             m->seq_step = -1;
+            m->seq_direction = 1;
             m->internal_frames = 0;
             mono_advance_step(m);
         }
@@ -1363,7 +1430,9 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "track")) return snprintf(buf, (size_t)buf_len, "%d", m->selected_track);
     if (!strcmp(key, "page")) return snprintf(buf, (size_t)buf_len, "%d", m->selected_page);
     if (!strcmp(key, "step_page")) return snprintf(buf, (size_t)buf_len, "%d", m->step_page);
+    if (!strcmp(key, "pattern_start")) return snprintf(buf, (size_t)buf_len, "%d", m->pattern_start);
     if (!strcmp(key, "pattern_len")) return snprintf(buf, (size_t)buf_len, "%d", m->pattern_len);
+    if (!strcmp(key, "play_order")) return snprintf(buf, (size_t)buf_len, "%d", m->play_order);
     if (!strcmp(key, "transport")) return snprintf(buf, (size_t)buf_len, "%d", m->transport);
     if (!strcmp(key, "record")) return snprintf(buf, (size_t)buf_len, "%d", m->record_locks);
     if (!strcmp(key, "play_step")) return snprintf(buf, (size_t)buf_len, "%d", m->seq_step);
@@ -1388,10 +1457,22 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         }
         return n;
     }
+    if (!strcmp(key, "all_steps")) {
+        int n = 0;
+        for (int i = 0; i < MONO_STEPS; ++i) {
+            mono_step_t *s = &t->steps[i];
+            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
     if (!strcmp(key, "status"))
-        return snprintf(buf, (size_t)buf_len, "%d:%d:%.1f:%d:%d:%d:%d:%d",
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%.1f:%d:%d:%d:%d:%d:%d:%d",
                         m->transport, m->seq_step, bpm_now(m), m->selected_track,
-                        m->selected_page, t->machine, m->pattern_len, m->record_locks);
+                        m->selected_page, t->machine, m->pattern_len, m->record_locks,
+                        m->pattern_start, m->play_order);
     if (!strcmp(key, "rui_poll"))
         return snprintf(buf, (size_t)buf_len, "%u:%d:%d:%.0f:%d",
                         m->revision, m->transport, m->seq_step, bpm_now(m),
@@ -1409,6 +1490,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                         (int)lrintf(t->freq * 10.0f), t->base[13]);
     if (!strcmp(key, "state")) {
         char step_csv[96];
+        char all_step_csv[192];
         int sn = 0;
         int first = m->step_page * 16;
         for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
@@ -1419,19 +1501,30 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
             if (wrote < 0 || wrote >= (int)sizeof(step_csv) - sn) break;
             sn += wrote;
         }
+        int an = 0;
+        for (int i = 0; i < MONO_STEPS && an < (int)sizeof(all_step_csv); ++i) {
+            mono_step_t *s = &t->steps[i];
+            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int wrote = snprintf(all_step_csv + an, sizeof(all_step_csv) - (size_t)an,
+                                 "%s%d", i ? "," : "", state);
+            if (wrote < 0 || wrote >= (int)sizeof(all_step_csv) - an) break;
+            an += wrote;
+        }
         int n = 0;
         if (!appendf(buf, buf_len, &n,
                      "{\"v\":4,\"track\":%d,\"page\":%d,\"step_page\":%d,"
-                     "\"pattern_len\":%d,\"master\":%.0f,\"bpm_override\":%.1f,"
+                     "\"pattern_start\":%d,\"pattern_len\":%d,\"play_order\":%d,"
+                     "\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
                      "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
                      "\"alt5\":%d,\"alt6\":%d,\"alt7\":%d,\"alt8\":%d,"
                      "\"record\":%d,"
                      "\"debug\":\"%u:%d:%d\","
-                     "\"steps\":\"%s\",\"data\":\"",
+                     "\"steps\":\"%s\",\"all_steps\":\"%s\",\"data\":\"",
                      m->selected_track, m->selected_page, m->step_page,
-                     m->pattern_len, m->master * 100.0f, m->bpm_override,
+                     m->pattern_start, m->pattern_len, m->play_order,
+                     m->master * 100.0f, m->bpm_override,
                      t->machine,
                      t->base[m->selected_page * 8], t->base[m->selected_page * 8 + 1],
                      t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
@@ -1443,7 +1536,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[MONO_ALT_BASE + 6], t->base[MONO_ALT_BASE + 7],
                      m->record_locks,
                      m->note_events, m->render_peak, m->lifetime_peak,
-                     step_csv)) return -1;
+                     step_csv, all_step_csv)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];
             if (!appendf(buf, buf_len, &n, "T%X%02X", tr, saved->machine)) return -1;

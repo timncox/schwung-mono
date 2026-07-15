@@ -274,6 +274,53 @@ static void test_sequencer_and_lock(void) {
     mono_destroy(m);
 }
 
+static void test_pattern_window_and_play_orders(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "pattern_start", "16");
+    mono_set_param(m, "pattern_len", "4");
+
+    mono_set_param(m, "play_order", "0");
+    mono_set_param(m, "transport", "1");
+    assert(get_int(m, "play_step") == 16);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 17);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 18);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 19);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 16);
+
+    mono_set_param(m, "play_order", "1");
+    mono_advance_step(m); assert(get_int(m, "play_step") == 19);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 18);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 17);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 16);
+    mono_advance_step(m); assert(get_int(m, "play_step") == 19);
+
+    mono_set_param(m, "play_order", "2");
+    const int pendulum[] = {16, 17, 18, 19, 18, 17, 16, 17};
+    for (size_t i = 0; i < sizeof(pendulum) / sizeof(pendulum[0]); ++i) {
+        mono_advance_step(m);
+        assert(get_int(m, "play_step") == pendulum[i]);
+    }
+
+    mono_set_param(m, "play_order", "3");
+    int seen = 0;
+    for (int i = 0; i < 32; ++i) {
+        mono_advance_step(m);
+        int step = get_int(m, "play_step");
+        assert(step >= 16 && step <= 19);
+        seen |= 1 << (step - 16);
+    }
+    assert((seen & (seen - 1)) != 0);
+
+    mono_set_param(m, "step_page", "3");
+    mono_set_param(m, "toggle_step", "63");
+    char all_steps[256];
+    get_string(m, "all_steps", all_steps, sizeof(all_steps));
+    assert(strlen(all_steps) == MONO_STEPS * 2 - 1);
+    assert(all_steps[strlen(all_steps) - 1] == '1');
+    mono_destroy(m);
+}
+
 static void test_live_parameter_recording_and_smoothing(void) {
     mono_t *m = mono_create(&host, 1);
     assert(m);
@@ -396,6 +443,9 @@ static void test_remote_state_contract(void) {
     assert(m);
     mono_set_param(m, "rui_set", "track:2");
     mono_set_param(m, "rui_set", "page:3");
+    mono_set_param(m, "rui_set", "pattern_start:8");
+    mono_set_param(m, "rui_set", "pattern_len:24");
+    mono_set_param(m, "rui_set", "play_order:3");
     mono_set_param(m, "rui_set", "p4:99");
     mono_set_param(m, "rui_set", "toggle_step:0");
     mono_set_param(m, "rui_set", "rui_set:track:0");
@@ -407,8 +457,12 @@ static void test_remote_state_contract(void) {
     get_string(m, "rui_poll", poll, sizeof(poll));
     assert(strstr(state, "\"track\":2"));
     assert(strstr(state, "\"page\":3"));
+    assert(strstr(state, "\"pattern_start\":8"));
+    assert(strstr(state, "\"pattern_len\":24"));
+    assert(strstr(state, "\"play_order\":3"));
     assert(strstr(state, "\"p4\":99"));
     assert(strstr(state, "\"steps\":\"1,"));
+    assert(strstr(state, "\"all_steps\":\"1,"));
     assert(strstr(state, "\"debug\":\"1:"));
     assert(strchr(poll, ':'));
     mono_set_param(m, "note_off", "60");
@@ -421,6 +475,9 @@ static void test_full_state_round_trip(void) {
     assert(source && restored);
 
     mono_set_param(source, "pattern_len", "64");
+    mono_set_param(source, "pattern_start", "12");
+    mono_set_param(source, "pattern_len", "20");
+    mono_set_param(source, "play_order", "2");
     mono_set_param(source, "master", "137");
     mono_set_param(source, "bpm_override", "123.5");
     mono_set_param(source, "track", "0");
@@ -453,7 +510,9 @@ static void test_full_state_round_trip(void) {
     assert(get_int(restored, "track") == 4);
     assert(get_int(restored, "page") == 6);
     assert(get_int(restored, "step_page") == 3);
-    assert(get_int(restored, "pattern_len") == 64);
+    assert(get_int(restored, "pattern_start") == 12);
+    assert(get_int(restored, "pattern_len") == 20);
+    assert(get_int(restored, "play_order") == 2);
     assert(get_int(restored, "master") == 137);
     assert(get_int(restored, "machine") == 5);
     assert(get_int(restored, "p8") == 111);
@@ -602,6 +661,7 @@ int main(void) {
     test_lfo_can_modulate_lfo_settings();
     test_shift_layer_controls_are_audible();
     test_sequencer_and_lock();
+    test_pattern_window_and_play_orders();
     test_live_parameter_recording_and_smoothing();
     test_internal_clock();
     test_clock_loss_falls_back();

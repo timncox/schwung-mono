@@ -13,7 +13,7 @@
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; color:var(--ink); background:#161715;
     font:700 12px/1.25 Arial,Helvetica,sans-serif; letter-spacing:.035em; }
-  button,input { font:inherit; }
+  button,input,select { font:inherit; }
   .machine { width:min(1180px,calc(100% - 24px)); margin:12px auto 32px; padding:14px;
     border:2px solid #f0eee5; border-right-color:#777871; border-bottom-color:#666761;
     border-radius:7px; background:linear-gradient(145deg,var(--case-hi),var(--case) 42%,#b1b1aa);
@@ -55,11 +55,17 @@
   .sequencer,.keyboard { padding:9px; color:#eee; background:#242622; border:1px solid #090a09; }
   .seqbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
   .seqbar .spacer { flex:1; }
-  .steps { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
+  .steps { display:grid; grid-template-columns:repeat(16,minmax(28px,1fr)); gap:5px; }
   .step { min-width:0; padding:4px; height:30px; color:#aaa; }
   .step.on { color:#fff; background:#b41d19; }
   .step.locked { color:#fff; background:#713d88; }
   .step.playing { outline:2px solid #dbf5c4; outline-offset:1px; }
+  .step.outside { opacity:.38; }
+  .step.start { box-shadow:inset 0 0 0 2px #f5f2db; }
+  .seq-control { display:flex; align-items:center; gap:5px; font-size:9px; }
+  .seq-control input,.seq-control select { width:58px; height:30px; color:#eee; background:#292b28;
+    border:1px solid #5d5f58; border-radius:3px; padding:4px; }
+  .seq-control select { width:92px; }
   .keys { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
   .key { height:54px; color:#181916; background:linear-gradient(#fbfaf4,#c9c8c0); border-color:#686963;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
@@ -76,6 +82,7 @@
   @media(max-width:850px) {
     .top,.lower { grid-template-columns:1fr; }
     .control-grid { grid-template-columns:repeat(4,1fr); }
+    .steps { grid-template-columns:repeat(8,1fr); }
   }
   @media(max-width:480px) {
     .machine { width:100%; margin:0; border-radius:0; }
@@ -109,10 +116,13 @@
     </section>
     <section class="section lower">
       <div class="sequencer" id="sequencer">
-        <div class="seqbar"><button id="play" class="green">PLAY</button><button id="pageDown">◀ 16</button><button id="pageUp">16 ▶</button>
-          <span class="spacer"></span><span id="stepRange">STEPS 01–16</span></div>
+        <div class="seqbar"><button id="play" class="green">PLAY</button>
+          <label class="seq-control">START <input id="patternStart" type="number" min="1" max="64" value="1"></label>
+          <label class="seq-control">LENGTH <input id="patternLength" type="number" min="1" max="64" value="16"></label>
+          <label class="seq-control">ORDER <select id="playOrder"><option value="0">FORWARD</option><option value="1">REVERSE</option><option value="2">PENDULUM</option><option value="3">RANDOM</option></select></label>
+          <span class="spacer"></span><span id="stepRange">WINDOW 01–16 / 64</span></div>
         <div class="steps" id="steps"></div>
-        <div class="hint">Click a step to toggle it. Purple steps contain parameter locks.</div>
+        <div class="hint">All 64 steps are shown. Click to toggle; dim steps are outside the playback window, and purple steps contain parameter locks.</div>
       </div>
       <div class="keyboard"><div class="legend">AUDITION KEYBOARD</div>
         <div class="audition-status" id="auditionStatus" role="status" aria-live="polite">Hold a note to audition the selected track.</div>
@@ -212,9 +222,9 @@ for (let i=0;i<8;i++) {
   const slider=el(`p${i+1}`);
   slider.oninput=()=>{const key=controlKey(i),raw=rawControlValue(i,slider.value);touched[key]=Date.now();el(`value${i}`).value=displayValue(i,raw);send(key,raw);};
 }
-for (let i=0;i<16;i++) {
+for (let i=0;i<64;i++) {
   const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
-  b.onclick=()=>send("toggle_step",number("step_page")*16+i); el("steps").appendChild(b);
+  b.onclick=()=>send("toggle_step",i); el("steps").appendChild(b);
 }
 function noteOn(note, button) {
   if(releaseTimers.has(note)){clearTimeout(releaseTimers.get(note));releaseTimers.delete(note);}
@@ -247,8 +257,9 @@ window.addEventListener("keyup",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()
 window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));});
 el("play").onclick=()=>{send("transport",number("transport")?0:1); render();};
 el("record").onclick=()=>{send("record",number("record")?0:1); render();};
-function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render();}
-el("pageDown").onclick=()=>changeStepPage(-1); el("pageUp").onclick=()=>changeStepPage(1);
+el("patternStart").onchange=()=>{const start=Math.max(1,Math.min(64,Number(el("patternStart").value)||1));send("pattern_start",start-1);render();};
+el("patternLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("pattern_start"),Number(el("patternLength").value)||1));send("pattern_len",length);render();};
+el("playOrder").onchange=()=>{send("play_order",el("playOrder").value);render();};
 el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
 
 function syncRange(id,value,out,touchKey=id) {
@@ -262,7 +273,7 @@ function render() {
   const voice=PREFIX==="synth:"; el("mode").textContent=voice?"MONO VOICE / SLOT":"MONO / OVERTAKE";
   el("trackSection").hidden=voice; el("sequencer").hidden=voice;
   const machine=Math.max(0,Math.min(5,number("machine"))), page=Math.max(0,Math.min(6,number("page")));
-  const track=Math.max(0,Math.min(5,number("track"))), stepPage=Math.max(0,Math.min(3,number("step_page")));
+  const track=Math.max(0,Math.min(5,number("track")));
   [...el("tracks").children].forEach((b,i)=>b.classList.toggle("active",i===track));
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
@@ -277,13 +288,17 @@ function render() {
     el(`value${i}`).value=displayValue(i,value);
   }
   syncRange("master",number("master",100),"masterValue");
-  const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
-  [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});
+  const start=Math.max(0,Math.min(63,number("pattern_start"))),length=Math.max(1,Math.min(64-start,number("pattern_len",16)));
+  const steps=String(M.all_steps||M.steps||"").split(",").map(Number), play=number("play_step",-1);
+  [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===i);b.classList.toggle("outside",i<start||i>=start+length);b.classList.toggle("start",i===start);b.textContent=String(i+1).padStart(2,"0");});
   el("play").classList.toggle("active",!!number("transport")); el("play").textContent=number("transport")?"STOP":"PLAY";
   el("record").classList.toggle("active",!!number("record")); el("record").textContent=number("record")?"RECORDING ARMED":"ARM RECORDING";
-  el("stepRange").textContent=`STEPS ${String(stepPage*16+1).padStart(2,"0")}–${String(stepPage*16+16).padStart(2,"0")}`;
+  if(document.activeElement!==el("patternStart"))el("patternStart").value=start+1;
+  el("patternLength").max=64-start;if(document.activeElement!==el("patternLength"))el("patternLength").value=length;
+  if(document.activeElement!==el("playOrder"))el("playOrder").value=String(number("play_order"));
+  el("stepRange").textContent=`WINDOW ${String(start+1).padStart(2,"0")}–${String(start+length).padStart(2,"0")} / 64`;
   el("screen").textContent=voice?`${MACHINES[machine]} · VOICE`:`T${track+1} · ${MACHINES[machine]}`;
-  el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / ${number("pattern_len",16)} STEPS${number("record")?" / REC":""}`;
+  el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / S${String(start+1).padStart(2,"0")}+${length}${number("record")?" / REC":""}`;
   el("screenTempo").textContent=`${Number(number("bpm",120)).toFixed(1)} BPM`;
   const debug=String(M.debug||"0:0:0").split(":"),events=Number(debug[0]||0),peak=Number(debug[2]||debug[1]||0);
   el("debug").textContent=`EVENTS ${events} / PEAK ${peak}`;
