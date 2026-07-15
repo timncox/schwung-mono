@@ -114,6 +114,11 @@
       <div class="tabs"><button id="record">ARM RECORDING</button></div>
       <div class="hint">Arm, start Move or Mono playback, then turn controls. Continuous parameters glide between captured step values; choices stay stepped.</div>
     </section>
+    <section class="section"><div class="legend">PATCH DATA</div>
+      <div class="tabs"><button id="exportPatch">EXPORT PATCH</button><button id="importPatch">IMPORT PATCH</button></div>
+      <input id="patchFile" type="file" accept="application/json,.json" hidden>
+      <div class="hint">Export a portable sound/pattern backup or import one previously exported by Mono.</div>
+    </section>
     <section class="section lower">
       <div class="sequencer" id="sequencer">
         <div class="seqbar"><button id="play" class="green">PLAY</button>
@@ -190,6 +195,8 @@ const KEYBOARD = ["a","w","s","e","d","f","t","g","y","h","u","j","k"];
 const NOTE_NAMES = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
 const BLACK = new Set([1,3,6,8,10]);
 let PREFIX = null;
+let lastParamAt = 0;
+let lastStateRaw = null;
 let altLayer = false;
 let lastEventCount = -1;
 const M = {};
@@ -208,16 +215,37 @@ const isLfoWave = i => !altLayer && number("page") >= 4 && i === 2;
 const isLfoMode = i => isLfoTrigger(i) || isLfoWave(i);
 const destinationIndex = value => Math.max(0,Math.min(LFO_DESTS.length-1,Math.round(Number(value))));
 const lfoModeIndex = value => Math.max(0,Math.min(4,Math.floor(Math.max(0,Math.min(127,Math.round(Number(value))))*5/128)));
+const currentParamId = i => (altLayer?56:0)+number("page")*8+i;
+const secondsFromParam = (value,max) => value<=0?0:.002*Math.pow(max/.002,value/127);
+const formatTime = seconds => seconds<=0?"0 ms":seconds<1?`${Math.round(seconds*1000)} ms`:`${seconds.toFixed(seconds<10?2:1)} s`;
+function formatParameter(i,value){
+  const pid=currentParamId(i),times={8:4,9:4,10:12,11:8,15:3,20:4,21:8,88:8,89:4,90:2,96:8,97:4,98:2,104:8,105:4,106:2};
+  if(times[pid])return formatTime(secondsFromParam(value,times[pid]));
+  if(pid===28)return formatTime(.015+1.82*value/127);
+  if(pid===16||pid===24){const hz=18*Math.pow(1000,value/127);return hz>=1000?`${(hz/1000).toFixed(1)} kHz`:`${Math.round(hz)} Hz`;}
+  if(pid===7)return `${Math.round((value-64)*100/64)} cents`;
+  if(pid===14){const pan=Math.round((value-64)*100/64);return pan===0?"Center":`${pan<0?"L":"R"} ${Math.abs(pan)}%`;}
+  if(pid===25)return `${value>=64?"+":""}${value-64} dB`;
+  if(pid===76||pid===77)return value<64?"12 dB/oct":"24 dB/oct";
+  if(pid===93||pid===101||pid===109)return value<64?"Unipolar":"Bipolar";
+  if(pid===62||pid===82)return `${16-Math.round(value*12/127)} bit`;
+  return String(value).padStart(3,"0");
+}
 const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
   : isLfoTrigger(i) ? LFO_TRIGGER_NAMES[lfoModeIndex(value)]
   : isLfoWave(i) ? LFO_WAVE_NAMES[lfoModeIndex(value)]
-  : String(value).padStart(3,"0");
+  : formatParameter(i,Number(value));
 const rawControlValue = (i,value) => isLfoMode(i) ? LFO_MODE_VALUES[Math.max(0,Math.min(4,Math.round(Number(value))))] : Number(value);
 function send(key, value) {
   if (!PREFIX) return false;
   M[key] = String(value);
   const direct=key==="note_on"||key==="note_off";
   schwungRemote.setParam(PREFIX+(direct?key:"rui_set"),direct?String(value):`${key}:${value}`);
+  return true;
+}
+function sendDirect(prefix,key,value) {
+  if(!prefix)return false;
+  schwungRemote.setParam(prefix+key,String(value));
   return true;
 }
 const noteName = note => `${NOTE_NAMES[note%12]} · MIDI ${note}`;
@@ -243,18 +271,21 @@ for (let i=0;i<64;i++) {
 function noteOn(note, button) {
   if(releaseTimers.has(note)){clearTimeout(releaseTimers.get(note));releaseTimers.delete(note);}
   if(held.has(note))return;
-  held.add(note);noteStarted.set(note,Date.now());button&&button.classList.add("held");
-  if(send("note_on",`${note}:112`))auditionMessage(`${noteName(note)} · NOTE ON SENT`);
+  const started={time:Date.now(),track:number("track"),prefix:PREFIX};
+  held.add(note);noteStarted.set(note,started);button&&button.classList.add("held");
+  if(sendDirect(started.prefix,"note_on",`${started.track}:${note}:112`))auditionMessage(`${noteName(note)} · NOTE ON SENT`);
   else auditionMessage("NO MONO MODULE CONNECTED",true);
 }
 function finishNoteOff(note, button) {
   if(!held.has(note))return;
+  const started=noteStarted.get(note)||{track:number("track"),prefix:PREFIX};
   held.delete(note);noteStarted.delete(note);releaseTimers.delete(note);
-  button&&button.classList.remove("held");send("note_off",note);
+  button&&button.classList.remove("held");sendDirect(started.prefix,"note_off",`${started.track}:${note}`);
 }
 function noteOff(note, button, immediate=false) {
   if(!held.has(note)||releaseTimers.has(note))return;
-  const wait=immediate?0:Math.max(0,220-(Date.now()-(noteStarted.get(note)||0)));
+  const started=noteStarted.get(note),startedAt=started&&started.time||0;
+  const wait=immediate?0:Math.max(0,220-(Date.now()-startedAt));
   if(wait>0){releaseTimers.set(note,setTimeout(()=>finishNoteOff(note,button),wait));return;}
   finishNoteOff(note,button);
 }
@@ -275,6 +306,19 @@ el("patternStart").onchange=()=>{const start=Math.max(1,Math.min(64,Number(el("p
 el("patternLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("pattern_start"),Number(el("patternLength").value)||1));send("pattern_len",length);render();};
 el("playOrder").onchange=()=>{send("play_order",el("playOrder").value);render();};
 el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
+el("exportPatch").onclick=()=>{
+  if(!lastStateRaw){auditionMessage("NO PATCH STATE AVAILABLE",true);return;}
+  let state=lastStateRaw;try{state=JSON.parse(lastStateRaw);}catch(e){}
+  const payload=JSON.stringify({module:PREFIX==="synth:"?"mono-voice":"mono",format:1,state},null,2);
+  const blob=new Blob([payload],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download=`${PREFIX==="synth:"?"mono-voice":"mono"}-patch.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+el("importPatch").onclick=()=>el("patchFile").click();
+el("patchFile").onchange=async()=>{
+  const file=el("patchFile").files&&el("patchFile").files[0];if(!file||!PREFIX)return;
+  try{const payload=JSON.parse(await file.text()),state=payload.state===undefined?payload:payload.state,raw=typeof state==="string"?state:JSON.stringify(state);schwungRemote.setParam(PREFIX+"state",raw);auditionMessage(`IMPORTED ${file.name}`);}
+  catch(e){auditionMessage("PATCH IMPORT FAILED",true);}finally{el("patchFile").value="";}
+};
 
 function syncRange(id,value,out,touchKey=id) {
   if(Date.now()-(touched[touchKey]||0)>800 && document.activeElement!==el(id)) el(id).value=value;
@@ -320,9 +364,25 @@ function render() {
   lastEventCount=events;
 }
 schwungRemote.onParamChange(params=>{
-  for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix)continue;if(!PREFIX)PREFIX=prefix;if(prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];M.record=p[3];}else if(name==="state"){try{Object.assign(M,JSON.parse(String(params[key])));}catch(e){M.state=params[key];}}else M[name]=params[key];}
+  const seen=[];
+  for(const key in params){if(key.startsWith("overtake_dsp:"))seen.push("overtake_dsp:");else if(key.startsWith("synth:"))seen.push("synth:");}
+  const unique=[...new Set(seen)];
+  if(unique.length&&(!PREFIX||!unique.includes(PREFIX))){
+    [...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));
+    PREFIX=unique[0];Object.keys(M).forEach(key=>delete M[key]);lastStateRaw=null;lastEventCount=-1;
+  }
+  if(unique.includes(PREFIX))lastParamAt=Date.now();
+  for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix||prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];M.record=p[3];}else if(name==="state"){lastStateRaw=String(params[key]);try{Object.assign(M,JSON.parse(lastStateRaw));}catch(e){M.state=params[key];}}else M[name]=params[key];}
   render();
 });
+setInterval(()=>{
+  if(PREFIX&&lastParamAt&&Date.now()-lastParamAt>5000){
+    [...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));
+    PREFIX=null;lastParamAt=0;lastStateRaw=null;Object.keys(M).forEach(key=>delete M[key]);
+    el("offline").hidden=false;el("ui").hidden=true;el("connection").classList.remove("online");
+    el("connectionText").textContent="OFFLINE";el("screen").textContent="WAITING FOR MOVE";
+  }
+},1000);
 </script>
 </body>
 </html>

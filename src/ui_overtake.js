@@ -2,6 +2,7 @@
 import * as os from 'os';
 import {
     MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight, MoveRec,
+    MoveDelete,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
@@ -96,19 +97,21 @@ const COMMON_SHIFT = [null,
 const TRACK_PADS = [92, 93, 94, 95, 96, 97];
 const PAD_MACHINE = 98, PAD_TRANSPORT = 99;
 const STEP_FIRST = 16, STEP_COUNT = 16;
+const SHIFT_PARAM_BASE = 56;
 const PRESET_DIR = '/data/UserData/schwung/presets/mono';
 const SAVE_ROW = '[Save current...]';
 
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let recordArmed = false;
 let patternStart = 0, patternLen = 16, playOrder = 0, playStep = -1;
-let shift = false, tickCount = 0;
+let shift = false, deleteHeld = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let altValues = new Array(8).fill(0);
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
 let focusBank = 0;
 let presetMode = false, presetIndex = 0, presets = [];
+let deletePresetFile = null;
 let seqSetup = false;
 
 function gp(key) {
@@ -117,7 +120,9 @@ function gp(key) {
 }
 
 function safePresetStem(name) {
-    return name.replace(/[\/\\\x00-\x1f]/g, '').trim() || 'Mono Pattern';
+    const clean = name.replace(/[\/\\:*?"<>|\x00-\x1f]/g, '-')
+        .replace(/\s+/g, ' ').replace(/[. ]+$/g, '').trim();
+    return (clean || 'Mono Pattern').slice(0, 64);
 }
 
 function loadPresetList() {
@@ -133,18 +138,45 @@ function loadPresetList() {
     }).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-function uniquePresetName(rawName) {
+function uniquePresetName(rawName, excludeFile = null) {
     const base = rawName.trim() || 'Mono Pattern';
-    const used = new Set(presets.map(p => p.name.toLowerCase()));
+    const used = new Set(presets.filter(p => p.file !== excludeFile)
+        .map(p => p.name.toLowerCase()));
     if (!used.has(base.toLowerCase())) return base;
     let suffix = 2;
     while (used.has(`${base} ${suffix}`.toLowerCase())) suffix++;
     return `${base} ${suffix}`;
 }
 
+function uniquePresetStem(rawName, excludeFile = null) {
+    const base = safePresetStem(rawName);
+    const used = new Set(presets.filter(p => p.file !== excludeFile)
+        .map(p => p.file.replace(/\.json$/i, '').toLowerCase()));
+    if (!used.has(base.toLowerCase())) return base;
+    let suffix = 2, candidate = '';
+    do { candidate = `${base.slice(0, 58)} ${suffix++}`; }
+    while (used.has(candidate.toLowerCase()));
+    return candidate;
+}
+
+function writePresetAtomically(file, payload) {
+    if (typeof host_write_file !== 'function') return false;
+    const path = `${PRESET_DIR}/${file}`;
+    const temp = `${path}.tmp`;
+    if (!host_write_file(temp, payload)) return false;
+    try {
+        os.rename(temp, path);
+        return true;
+    } catch (e) {
+        try { os.remove(temp); } catch (ignored) {}
+        return false;
+    }
+}
+
 function openPresetBrowser() {
     loadPresetList();
     presetIndex = 0;
+    deletePresetFile = null;
     presetMode = true;
     needsRedraw = true;
     announce(`Mono presets, ${presets.length} saved`);
@@ -162,18 +194,66 @@ function saveCurrentPreset(rawName) {
     if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
     else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
     const name = uniquePresetName(rawName);
-    const stem = safePresetStem(name);
+    const stem = uniquePresetStem(name);
     let state;
     try { state = JSON.parse(stateJson); } catch (e) { state = stateJson; }
     const payload = JSON.stringify({name, module: 'mono', version: 1, state});
-    const ok = typeof host_write_file === 'function'
-        && host_write_file(`${PRESET_DIR}/${stem}.json`, payload);
+    const ok = writePresetAtomically(`${stem}.json`, payload);
     if (!ok) { announce('Preset save failed'); return; }
     loadPresetList();
     const found = presets.findIndex(p => p.name === name);
     presetIndex = found >= 0 ? found + 1 : 0;
     needsRedraw = true;
     announce(`Saved ${name}`);
+}
+
+function startPresetRename() {
+    const entry = presets[presetIndex - 1];
+    if (!entry) return;
+    openTextEntry({
+        title: '',
+        initialText: entry.name,
+        onAnnounce: announce,
+        onConfirm: rawName => {
+            let payload;
+            try { payload = JSON.parse(host_read_file(`${PRESET_DIR}/${entry.file}`) || '{}'); }
+            catch (e) { announce('Preset rename failed'); return; }
+            const name = uniquePresetName(rawName || entry.name, entry.file);
+            const file = `${uniquePresetStem(name, entry.file)}.json`;
+            payload.name = name;
+            if (!writePresetAtomically(file, JSON.stringify(payload))) {
+                announce('Preset rename failed'); return;
+            }
+            if (file !== entry.file) {
+                try { os.remove(`${PRESET_DIR}/${entry.file}`); } catch (e) {}
+            }
+            loadPresetList();
+            presetIndex = Math.max(1, presets.findIndex(p => p.file === file) + 1);
+            deletePresetFile = null;
+            needsRedraw = true;
+            announce(`Renamed ${name}`);
+        },
+        onCancel: () => { needsRedraw = true; announce('Rename cancelled'); }
+    });
+}
+
+function deleteSelectedPreset() {
+    const entry = presets[presetIndex - 1];
+    if (!entry) return;
+    if (deletePresetFile !== entry.file) {
+        deletePresetFile = entry.file;
+        needsRedraw = true;
+        announce(`Press Delete again to remove ${entry.name}`);
+        return;
+    }
+    try {
+        if (os.remove(`${PRESET_DIR}/${entry.file}`) < 0) throw new Error('remove failed');
+    } catch (e) { announce('Preset delete failed'); return; }
+    deletePresetFile = null;
+    loadPresetList();
+    presetIndex = Math.min(presetIndex, presets.length);
+    needsRedraw = true;
+    announce(`Deleted ${entry.name}`);
 }
 
 function startPresetSave() {
@@ -215,7 +295,7 @@ function shiftActive() {
         return true;
     return shift;
 }
-function shiftLayer() { return shiftActive() && !heldStep; }
+function shiftLayer() { return shiftActive(); }
 function names() { return shiftLayer() ? (page === 0 ? SYNTH_SHIFT[machine] : COMMON_SHIFT[page])
                                       : (page === 0 ? SYNTH[machine] : COMMON[page]); }
 function activeValues() { return shiftLayer() ? altValues : values; }
@@ -228,11 +308,39 @@ function lfoModeIndex(value) {
     const raw = Math.max(0, Math.min(127, Math.round(value)));
     return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
 }
+function currentParamId(i) { return (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i; }
+function secondsFromParam(value, maxSeconds) {
+    return value <= 0 ? 0 : 0.002 * Math.pow(maxSeconds / 0.002, value / 127);
+}
+function shortTime(seconds) {
+    if (seconds <= 0) return '0MS';
+    if (seconds < 1) return `${Math.round(seconds * 1000)}MS`.slice(0, 5);
+    return `${seconds < 10 ? seconds.toFixed(2) : seconds.toFixed(1)}S`.slice(0, 5);
+}
+function shortHz(value) {
+    const hz = 18 * Math.pow(1000, value / 127);
+    return hz >= 1000 ? `${(hz / 1000).toFixed(hz < 10000 ? 1 : 0)}K` : `${Math.round(hz)}HZ`;
+}
+function parameterValue(i, value) {
+    const pid = currentParamId(i);
+    const times = {8:4, 9:4, 10:12, 11:8, 15:3, 20:4, 21:8,
+        88:8, 89:4, 90:2, 96:8, 97:4, 98:2, 104:8, 105:4, 106:2};
+    if (times[pid]) return shortTime(secondsFromParam(value, times[pid]));
+    if (pid === 28) return shortTime(0.015 + 1.82 * value / 127);
+    if (pid === 16 || pid === 24) return shortHz(value);
+    if (pid === 7) { const cents = Math.round((value - 64) * 100 / 64); return `${cents >= 0 ? '+' : ''}${cents}C`; }
+    if (pid === 14) { const pan = Math.round((value - 64) * 100 / 64); return pan === 0 ? 'CENTR' : `${pan < 0 ? 'L' : 'R'}${Math.abs(pan)}`; }
+    if (pid === 25) { const gain = value - 64; return gain === 0 ? '0DB' : `${gain > 0 ? '+' : ''}${gain}DB`; }
+    if (pid === 76 || pid === 77) return value < 64 ? '12DB' : '24DB';
+    if (pid === 93 || pid === 101 || pid === 109) return value < 64 ? 'UNI' : 'BI';
+    if (pid === 62 || pid === 82) return `${16 - Math.round(value * 12 / 127)}BIT`;
+    return `${value}`.padStart(3, '0');
+}
 function displayValue(i, value) {
     if (isLfoDestination(i)) return LFO_DEST_SCREEN[destinationIndex(value)];
     if (isLfoTrigger(i)) return LFO_TRIGGER_SCREEN[lfoModeIndex(value)];
     if (isLfoWave(i)) return LFO_WAVE_SCREEN[lfoModeIndex(value)];
-    return `${value}`.padStart(3, '0');
+    return parameterValue(i, value);
 }
 function announcedValue(i, value) {
     if (isLfoDestination(i)) return LFO_DESTS[destinationIndex(value)];
@@ -351,8 +459,8 @@ function adjust(i, delta) {
     target[i] = v;
     if (heldStep) {
         heldStep.used = true;
-        const absoluteParam = page * 8 + i;
-        if (shiftActive())
+        const absoluteParam = (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i;
+        if (deleteHeld)
             host_module_set_param('unlock', `${track}:${heldStep.step}:${absoluteParam}:0`);
         else
             host_module_set_param('lock', `${track}:${heldStep.step}:${absoluteParam}:${v}`);
@@ -360,7 +468,7 @@ function adjust(i, delta) {
     } else {
         host_module_set_param(shiftLayer() ? `alt${i + 1}` : `p${i + 1}`, `${v}`);
     }
-    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : announcedValue(i, v));
+    announceParameter(names()[i], deleteHeld && heldStep ? 'unlocked' : announcedValue(i, v));
     needsRedraw = true;
 }
 
@@ -425,7 +533,8 @@ function draw() {
         print(x, 34, displayValue(i, shown[i]), 1);
     }
     drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
-                right: heldStep ? (shiftActive() ? 'turn=unlock' : 'turn=lock')
+                right: heldStep ? (deleteHeld ? 'Delete+turn=clear'
+                    : (shiftLayer() ? 'Shift lock' : 'turn=lock'))
                     : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
     needsRedraw = false;
 }
@@ -442,7 +551,8 @@ function drawPresetBrowser() {
         const label = `${selected ? '> ' : '  '}${rows[index]}`.slice(0, 20);
         print(3, y, label, selected ? 0 : 1);
     }
-    drawFooter({left: 'Back', right: 'Click: save/load'});
+    drawFooter({left: deletePresetFile ? 'Delete again' : 'Back · Delete',
+                right: 'Click load · Shift rename'});
     needsRedraw = false;
 }
 
@@ -511,10 +621,16 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
         if (presetMode) {
+            if (d1 === MoveDelete) {
+                deleteHeld = d2 > 0;
+                if (d2 > 0) deleteSelectedPreset();
+                return;
+            }
             if (d1 === MoveMainKnob) {
                 const d = decodeDelta(d2);
                 if (d) {
                     presetIndex = Math.max(0, Math.min(presets.length, presetIndex + d));
+                    deletePresetFile = null;
                     const label = presetIndex === 0 ? SAVE_ROW : presets[presetIndex - 1].name;
                     announce(`Preset, ${label}`);
                     needsRedraw = true;
@@ -522,12 +638,15 @@ globalThis.onMidiMessageInternal = function(data) {
                 return;
             }
             if (d1 === MoveMainButton && d2 > 0) {
-                presetIndex === 0 ? startPresetSave() : loadSelectedPreset();
+                if (presetIndex === 0) startPresetSave();
+                else if (shiftActive()) startPresetRename();
+                else loadSelectedPreset();
                 return;
             }
             if (d1 === MoveBack && d2 > 0) { closePresetBrowser(); return; }
             return;
         }
+        if (d1 === MoveDelete) { deleteHeld = d2 > 0; needsRedraw = true; return; }
         if (d1 === MoveMainButton && d2 > 0 && shiftActive()) {
             openPresetBrowser();
             return;

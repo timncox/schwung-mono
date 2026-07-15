@@ -1748,13 +1748,18 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         return;
     }
     if (!strcmp(key, "note_on")) {
-        int note = 60, vel = 100;
-        sscanf(val, "%d:%d", &note, &vel);
-        mono_note_on(m, m->selected_track, note, vel);
+        int tr = m->selected_track, note = 60, vel = 100;
+        if (sscanf(val, "%d:%d:%d", &tr, &note, &vel) < 3) {
+            tr = m->selected_track;
+            sscanf(val, "%d:%d", &note, &vel);
+        }
+        mono_note_on(m, tr, note, vel);
         return;
     }
     if (!strcmp(key, "note_off")) {
-        mono_note_off(m, m->selected_track, v);
+        int tr = m->selected_track, note = v;
+        if (sscanf(val, "%d:%d", &tr, &note) < 2) tr = m->selected_track;
+        mono_note_off(m, tr, note);
         return;
     }
 }

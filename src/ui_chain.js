@@ -50,6 +50,7 @@ const LFO_TRIGGER_NAMES = ['Free', 'Retrigger', 'Hold', 'One Shot', 'Half Shot']
 const LFO_TRIGGER_SCREEN = ['FREE', 'TRIG', 'HOLD', 'ONE', 'HALF'];
 const LFO_WAVE_NAMES = ['Sine', 'Saw', 'Triangle', 'Square', 'Random'];
 const LFO_WAVE_SCREEN = ['SINE', 'SAW', 'TRI', 'SQR', 'RAND'];
+const SHIFT_PARAM_BASE = 56;
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -114,11 +115,39 @@ function lfoModeIndex(value) {
     const raw = Math.max(0, Math.min(127, Math.round(value)));
     return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
 }
+function currentParamId(i) { return (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i; }
+function secondsFromParam(value, maxSeconds) {
+    return value <= 0 ? 0 : 0.002 * Math.pow(maxSeconds / 0.002, value / 127);
+}
+function shortTime(seconds) {
+    if (seconds <= 0) return '0MS';
+    if (seconds < 1) return `${Math.round(seconds * 1000)}MS`.slice(0, 5);
+    return `${seconds < 10 ? seconds.toFixed(2) : seconds.toFixed(1)}S`.slice(0, 5);
+}
+function shortHz(value) {
+    const hz = 18 * Math.pow(1000, value / 127);
+    return hz >= 1000 ? `${(hz / 1000).toFixed(hz < 10000 ? 1 : 0)}K` : `${Math.round(hz)}HZ`;
+}
+function parameterValue(i, value) {
+    const pid = currentParamId(i);
+    const times = {8:4, 9:4, 10:12, 11:8, 15:3, 20:4, 21:8,
+        88:8, 89:4, 90:2, 96:8, 97:4, 98:2, 104:8, 105:4, 106:2};
+    if (times[pid]) return shortTime(secondsFromParam(value, times[pid]));
+    if (pid === 28) return shortTime(0.015 + 1.82 * value / 127);
+    if (pid === 16 || pid === 24) return shortHz(value);
+    if (pid === 7) { const cents = Math.round((value - 64) * 100 / 64); return `${cents >= 0 ? '+' : ''}${cents}C`; }
+    if (pid === 14) { const pan = Math.round((value - 64) * 100 / 64); return pan === 0 ? 'CENTR' : `${pan < 0 ? 'L' : 'R'}${Math.abs(pan)}`; }
+    if (pid === 25) { const gain = value - 64; return gain === 0 ? '0DB' : `${gain > 0 ? '+' : ''}${gain}DB`; }
+    if (pid === 76 || pid === 77) return value < 64 ? '12DB' : '24DB';
+    if (pid === 93 || pid === 101 || pid === 109) return value < 64 ? 'UNI' : 'BI';
+    if (pid === 62 || pid === 82) return `${16 - Math.round(value * 12 / 127)}BIT`;
+    return `${value}`.padStart(3, '0');
+}
 function displayValue(i, value) {
     if (isLfoDestination(i)) return LFO_DEST_SCREEN[destinationIndex(value)];
     if (isLfoTrigger(i)) return LFO_TRIGGER_SCREEN[lfoModeIndex(value)];
     if (isLfoWave(i)) return LFO_WAVE_SCREEN[lfoModeIndex(value)];
-    return `${value}`.padStart(3, '0');
+    return parameterValue(i, value);
 }
 function announcedValue(i, value) {
     if (isLfoDestination(i)) return LFO_DESTS[destinationIndex(value)];
