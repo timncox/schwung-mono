@@ -12,7 +12,7 @@ It ships in two forms:
 
 ## Operation manual
 
-Open the self-contained [interactive Mono manual](docs/index.html) for the
+Open the [interactive Mono manual](https://timncox.github.io/schwung-mono/) for the
 quick start, full Move control map, parameter-lock workflow, seven-page editor,
 and machine reference.
 
