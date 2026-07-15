@@ -417,6 +417,111 @@ static void test_pattern_window_and_play_orders(void) {
     mono_destroy(m);
 }
 
+static void test_per_track_windows_rotation_division_and_swing(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    mono_set_param(m, "pattern_start", "0");
+    mono_set_param(m, "pattern_len", "8");
+    mono_set_param(m, "track", "1");
+    mono_set_param(m, "track_start", "16");
+    mono_set_param(m, "track_len", "3");
+    mono_set_param(m, "track_rotate", "1");
+    mono_set_param(m, "track_div", "2");
+    assert(get_int(m, "track_follow") == 0);
+
+    mono_set_param(m, "transport", "1");
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 0);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 17);
+    mono_advance_step(m);
+    assert(get_int(m, "track_play_step") == 17); /* divided clock holds */
+    mono_advance_step(m);
+    assert(get_int(m, "track_play_step") == 18);
+    mono_set_param(m, "track_follow", "1");
+    assert(get_int(m, "track_follow") == 1);
+    assert(get_int(m, "track_start") == 0);
+    assert(get_int(m, "track_len") == 8);
+
+    mono_set_param(m, "swing", "127");
+    mono_set_param(m, "transport", "0");
+    uint8_t start = 0xFA, tick = 0xF8;
+    mono_on_midi(m, &start, 1, MOVE_MIDI_SOURCE_HOST);
+    assert(get_int(m, "play_step") == 0);
+    for (int i = 0; i < 8; ++i) mono_on_midi(m, &tick, 1, MOVE_MIDI_SOURCE_HOST);
+    assert(get_int(m, "play_step") == 0);
+    mono_on_midi(m, &tick, 1, MOVE_MIDI_SOURCE_HOST);
+    assert(get_int(m, "play_step") == 1);
+    mono_destroy(m);
+}
+
+static void test_step_track_copy_paste_and_undo(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    mono_set_param(m, "track", "0");
+    mono_set_param(m, "machine", "3");
+    mono_set_param(m, "set_step", "2:64:111:80:15");
+    mono_set_param(m, "lock", "0:2:56:99");
+    mono_set_param(m, "copy_step", "0:2");
+    assert(get_int(m, "can_paste_step") == 1);
+    mono_set_param(m, "paste_step", "1:9");
+    mono_set_param(m, "track", "1");
+    mono_set_param(m, "step_page", "0");
+    char steps[128];
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(steps[18] == '2'); /* step 10 is locked */
+    mono_set_param(m, "undo", "1");
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(steps[18] == '0');
+    mono_set_param(m, "undo", "1");
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(steps[18] == '2'); /* undo toggles redo */
+
+    mono_set_param(m, "track", "0");
+    mono_set_param(m, "copy_track", "0");
+    mono_set_param(m, "paste_track", "1");
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "machine") == 3);
+    mono_set_param(m, "clear_step", "1:2");
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(steps[4] == '0');
+    mono_set_param(m, "undo", "1");
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(steps[4] == '2');
+    mono_destroy(m);
+}
+
+static void test_step_probability_condition_retrig_and_slide_state(void) {
+    mono_t *m = mono_create(&host, 1);
+    mono_t *restored = mono_create(&host, 1);
+    assert(m && restored);
+    mono_set_param(m, "set_step", "0:48:110:100:15");
+    mono_set_param(m, "edit_step", "0");
+    mono_set_param(m, "step_probability", "0");
+    mono_set_param(m, "step_retrig", "4");
+    mono_set_param(m, "step_condition", "3");
+    mono_set_param(m, "step_slide", "96");
+    assert(get_int(m, "step_probability") == 0);
+    assert(get_int(m, "step_retrig") == 4);
+    assert(get_int(m, "step_condition") == 3);
+    assert(get_int(m, "step_slide") == 96);
+
+    char state[16384];
+    assert(mono_get_param(m, "state", state, sizeof(state)) > 0);
+    mono_set_param(restored, "state", state);
+    mono_set_param(restored, "edit_step", "0");
+    assert(get_int(restored, "step_probability") == 0);
+    assert(get_int(restored, "step_retrig") == 4);
+    assert(get_int(restored, "step_condition") == 3);
+    assert(get_int(restored, "step_slide") == 96);
+
+    mono_set_param(m, "play_order", "0");
+    mono_set_param(m, "transport", "1");
+    assert(render_energy(m, 8) == 0); /* zero probability suppresses the trig */
+    mono_destroy(restored);
+    mono_destroy(m);
+}
+
 static void test_live_parameter_recording_and_smoothing(void) {
     mono_t *m = mono_create(&host, 1);
     assert(m);
@@ -597,7 +702,7 @@ static void test_full_state_round_trip(void) {
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":5"));
+    assert(strstr(state, "\"v\":7"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -646,12 +751,13 @@ static void test_v3_lfo_destinations_migrate(void) {
     assert(source && restored);
     char state[4096];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":5");
+    char *version = strstr(state, "\"v\":7");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '3';
     data += strlen("\"data\":\"");
     assert(!strncmp(data, "T000", 4));
+    memmove(data + 4, data + 14, strlen(data + 14) + 1); /* strip v6 track timing */
     memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
     memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
     memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
@@ -767,6 +873,9 @@ int main(void) {
     test_every_secondary_page_is_audible();
     test_sequencer_and_lock();
     test_pattern_window_and_play_orders();
+    test_per_track_windows_rotation_division_and_swing();
+    test_step_track_copy_paste_and_undo();
+    test_step_probability_condition_retrig_and_slide_state();
     test_live_parameter_recording_and_smoothing();
     test_internal_clock();
     test_clock_loss_falls_back();

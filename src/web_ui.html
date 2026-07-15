@@ -66,6 +66,14 @@
   .seq-control input,.seq-control select { width:58px; height:30px; color:#eee; background:#292b28;
     border:1px solid #5d5f58; border-radius:3px; padding:4px; }
   .seq-control select { width:92px; }
+  .step-editor { display:grid; grid-template-columns:repeat(4,minmax(110px,1fr)); gap:7px;
+    margin-top:9px; padding:9px; color:#eee; background:#171916; border:1px solid #555; }
+  .step-editor[hidden] { display:none; }
+  .step-editor .legend { grid-column:1/-1; margin:0; color:var(--lcd); }
+  .step-editor label { display:grid; grid-template-columns:1fr auto; align-items:center; gap:6px;
+    min-width:0; font-size:9px; }
+  .step-editor input,.step-editor select { width:72px; height:28px; color:#eee; background:#292b28;
+    border:1px solid #5d5f58; border-radius:3px; padding:4px; }
   .keys { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
   .key { height:54px; color:#181916; background:linear-gradient(#fbfaf4,#c9c8c0); border-color:#686963;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
@@ -121,13 +129,31 @@
     </section>
     <section class="section lower">
       <div class="sequencer" id="sequencer">
+        <div class="seqbar"><button id="editStep">EDIT STEP</button><button id="copyStep">COPY STEP</button><button id="pasteStep">PASTE STEP</button><button id="clearStep">CLEAR STEP</button><button id="undo">UNDO / REDO</button><button id="copyTrack">COPY TRACK</button><button id="pasteTrack">PASTE TRACK</button></div>
         <div class="seqbar"><button id="play" class="green">PLAY</button>
           <label class="seq-control">START <input id="patternStart" type="number" min="1" max="64" value="1"></label>
           <label class="seq-control">LENGTH <input id="patternLength" type="number" min="1" max="64" value="16"></label>
           <label class="seq-control">ORDER <select id="playOrder"><option value="0">FORWARD</option><option value="1">REVERSE</option><option value="2">PENDULUM</option><option value="3">RANDOM</option></select></label>
+          <label class="seq-control">SWING <input id="swing" type="number" min="50" max="75" value="50"></label>
           <span class="spacer"></span><span id="stepRange">WINDOW 01–16 / 64</span></div>
+        <div class="seqbar"><button id="trackFollow">T1 FOLLOWS GLOBAL</button>
+          <label class="seq-control">TRACK START <input id="trackStart" type="number" min="1" max="64" value="1"></label>
+          <label class="seq-control">TRACK LENGTH <input id="trackLength" type="number" min="1" max="64" value="16"></label>
+          <label class="seq-control">ROTATE <input id="trackRotate" type="number" min="0" max="63" value="0"></label>
+          <label class="seq-control">DIVISION <select id="trackDiv"><option value="1">1/1</option><option value="2">1/2</option><option value="3">1/3</option><option value="4">1/4</option><option value="5">1/5</option><option value="6">1/6</option><option value="7">1/7</option><option value="8">1/8</option></select></label></div>
         <div class="steps" id="steps"></div>
-        <div class="hint">All 64 steps are shown. Click to toggle; dim steps are outside the playback window, and purple steps contain parameter locks.</div>
+        <div class="step-editor" id="stepEditor" hidden>
+          <div class="legend" id="stepEditorTitle">STEP 01 DETAIL</div>
+          <label>NOTE <input id="stepNote" type="number" min="-1" max="127" value="60"></label>
+          <label>VELOCITY <input id="stepVelocity" type="number" min="1" max="127" value="100"></label>
+          <label>GATE <input id="stepGate" type="number" min="1" max="127" value="100"></label>
+          <label>TRIG MASK <input id="stepTrig" type="number" min="0" max="15" value="15"></label>
+          <label>PROBABILITY <input id="stepProbability" type="number" min="0" max="100" value="100"></label>
+          <label>RETRIG <input id="stepRetrig" type="number" min="1" max="8" value="1"></label>
+          <label>CONDITION <select id="stepCondition"><option value="0">ALWAYS</option><option value="1">1:2</option><option value="2">2:2</option><option value="3">1:4</option><option value="4">2:4</option><option value="5">3:4</option><option value="6">4:4</option></select></label>
+          <label>SLIDE <input id="stepSlide" type="number" min="0" max="100" value="0"></label>
+        </div>
+        <div class="hint">All 64 steps are shown. Click to toggle; choose Edit Step for probability, conditions, retrigs, and slide. Purple steps contain parameter locks.</div>
       </div>
       <div class="keyboard"><div class="legend">AUDITION KEYBOARD</div>
         <div class="audition-status" id="auditionStatus" role="status" aria-live="polite">Hold a note to audition the selected track.</div>
@@ -204,6 +230,7 @@ const touched = {};
 const held = new Set();
 const noteStarted = new Map();
 const releaseTimers = new Map();
+let stepTool = "toggle";
 const el = id => document.getElementById(id);
 const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[key]);
 const labels = () => altLayer ? (number("page")===0 ? SYNTH_SHIFT[number("machine")] : COMMON_SHIFT[number("page")])
@@ -266,8 +293,24 @@ for (let i=0;i<8;i++) {
 }
 for (let i=0;i<64;i++) {
   const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
-  b.onclick=()=>send("toggle_step",i); el("steps").appendChild(b);
+  b.onclick=()=>{
+    if(stepTool==="edit"){send("edit_step",i);render();return;}
+    const command=stepTool==="copy"?"copy_step":stepTool==="paste"?"paste_step":stepTool==="clear"?"clear_step":"toggle_step";
+    send(command,stepTool==="toggle"?i:`${number("track")}:${i}`);if(stepTool!=="toggle"){stepTool="toggle";render();}
+  }; el("steps").appendChild(b);
 }
+function chooseStepTool(tool){stepTool=stepTool===tool?"toggle":tool;render();}
+el("editStep").onclick=()=>chooseStepTool("edit");
+el("copyStep").onclick=()=>chooseStepTool("copy");
+el("pasteStep").onclick=()=>chooseStepTool("paste");
+el("clearStep").onclick=()=>chooseStepTool("clear");
+el("undo").onclick=()=>send("undo",1);
+el("copyTrack").onclick=()=>send("copy_track",number("track"));
+el("pasteTrack").onclick=()=>send("paste_track",number("track"));
+const stepInputs={stepNote:["step_note",-1,127],stepVelocity:["step_velocity",1,127],stepGate:["step_gate",1,127],stepTrig:["step_trig",0,15],stepRetrig:["step_retrig",1,8],stepCondition:["step_condition",0,6]};
+Object.entries(stepInputs).forEach(([id,[key,min,max]])=>el(id).onchange=()=>send(key,Math.max(min,Math.min(max,Number(el(id).value)||0))));
+el("stepProbability").onchange=()=>send("step_probability",Math.round(Math.max(0,Math.min(100,Number(el("stepProbability").value)||0))*127/100));
+el("stepSlide").onchange=()=>send("step_slide",Math.round(Math.max(0,Math.min(100,Number(el("stepSlide").value)||0))*127/100));
 function noteOn(note, button) {
   if(releaseTimers.has(note)){clearTimeout(releaseTimers.get(note));releaseTimers.delete(note);}
   if(held.has(note))return;
@@ -305,6 +348,12 @@ el("record").onclick=()=>{send("record",number("record")?0:1); render();};
 el("patternStart").onchange=()=>{const start=Math.max(1,Math.min(64,Number(el("patternStart").value)||1));send("pattern_start",start-1);render();};
 el("patternLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("pattern_start"),Number(el("patternLength").value)||1));send("pattern_len",length);render();};
 el("playOrder").onchange=()=>{send("play_order",el("playOrder").value);render();};
+el("swing").onchange=()=>{const percent=Math.max(50,Math.min(75,Number(el("swing").value)||50));send("swing",Math.round((percent-50)*127/25));render();};
+el("trackFollow").onclick=()=>{send("track_follow",number("track_follow",1)?0:1);render();};
+el("trackStart").onchange=()=>{const start=Math.max(1,Math.min(64,Number(el("trackStart").value)||1));send("track_start",start-1);render();};
+el("trackLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("track_start"),Number(el("trackLength").value)||1));send("track_len",length);render();};
+el("trackRotate").onchange=()=>{send("track_rotate",Math.max(0,Math.min(63,Number(el("trackRotate").value)||0)));render();};
+el("trackDiv").onchange=()=>{send("track_div",el("trackDiv").value);render();};
 el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
 el("exportPatch").onclick=()=>{
   if(!lastStateRaw){auditionMessage("NO PATCH STATE AVAILABLE",true);return;}
@@ -349,11 +398,25 @@ function render() {
   const start=Math.max(0,Math.min(63,number("pattern_start"))),length=Math.max(1,Math.min(64-start,number("pattern_len",16)));
   const steps=String(M.all_steps||M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===i);b.classList.toggle("outside",i<start||i>=start+length);b.classList.toggle("start",i===start);b.textContent=String(i+1).padStart(2,"0");});
+  [["editStep","edit"],["copyStep","copy"],["pasteStep","paste"],["clearStep","clear"]].forEach(([id,tool])=>el(id).classList.toggle("active",stepTool===tool));
+  const editing=stepTool==="edit",editStep=Math.max(0,Math.min(63,number("edit_step")));
+  el("stepEditor").hidden=!editing;el("stepEditorTitle").textContent=`STEP ${String(editStep+1).padStart(2,"0")} DETAIL`;
+  if(editing){
+    [["stepNote",number("step_note",-1)],["stepVelocity",number("step_velocity",100)],["stepGate",number("step_gate",100)],["stepTrig",number("step_trig",15)],["stepRetrig",number("step_retrig",1)],["stepCondition",number("step_condition",0)],["stepProbability",Math.round(number("step_probability",127)*100/127)],["stepSlide",Math.round(number("step_slide")*100/127)]].forEach(([id,value])=>{if(document.activeElement!==el(id))el(id).value=value;});
+  }
   el("play").classList.toggle("active",!!number("transport")); el("play").textContent=number("transport")?"STOP":"PLAY";
   el("record").classList.toggle("active",!!number("record")); el("record").textContent=number("record")?"RECORDING ARMED":"ARM RECORDING";
   if(document.activeElement!==el("patternStart"))el("patternStart").value=start+1;
   el("patternLength").max=64-start;if(document.activeElement!==el("patternLength"))el("patternLength").value=length;
   if(document.activeElement!==el("playOrder"))el("playOrder").value=String(number("play_order"));
+  if(document.activeElement!==el("swing"))el("swing").value=50+Math.round(number("swing")*25/127);
+  const follows=!!number("track_follow",1),trackStart=Math.max(0,Math.min(63,number("track_start"))),trackLength=Math.max(1,Math.min(64-trackStart,number("track_len",length)));
+  el("trackFollow").classList.toggle("active",follows);el("trackFollow").textContent=`T${track+1} ${follows?"FOLLOWS GLOBAL":"CUSTOM TIMING"}`;
+  if(document.activeElement!==el("trackStart"))el("trackStart").value=trackStart+1;
+  el("trackStart").disabled=follows;el("trackLength").disabled=follows;el("trackRotate").disabled=false;el("trackDiv").disabled=false;
+  el("trackLength").max=64-trackStart;if(document.activeElement!==el("trackLength"))el("trackLength").value=trackLength;
+  if(document.activeElement!==el("trackRotate"))el("trackRotate").value=number("track_rotate");
+  if(document.activeElement!==el("trackDiv"))el("trackDiv").value=String(number("track_div",1));
   el("stepRange").textContent=`WINDOW ${String(start+1).padStart(2,"0")}–${String(start+length).padStart(2,"0")} / 64`;
   el("screen").textContent=voice?`${MACHINES[machine]} · VOICE`:`T${track+1} · ${MACHINES[machine]}`;
   el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / S${String(start+1).padStart(2,"0")}+${length}${number("record")?" / REC":""}`;

@@ -2,7 +2,7 @@
 import * as os from 'os';
 import {
     MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight, MoveRec,
-    MoveDelete,
+    MoveDelete, MoveCopy, MoveUndo,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
@@ -104,7 +104,9 @@ const SAVE_ROW = '[Save current...]';
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
 let recordArmed = false;
 let patternStart = 0, patternLen = 16, playOrder = 0, playStep = -1;
-let shift = false, deleteHeld = false, tickCount = 0;
+let swing = 0, trackFollow = true, trackStart = 0, trackLen = 16;
+let trackRotate = 0, trackDiv = 1;
+let shift = false, deleteHeld = false, deleteUsed = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let altValues = new Array(8).fill(0);
@@ -365,6 +367,12 @@ function fetchAll() {
     patternStart = Math.max(0, Math.min(63, parseInt(p[8] || gp('pattern_start') || '0', 10) || 0));
     playOrder = Math.max(0, Math.min(PLAY_ORDERS.length - 1,
         parseInt(p[9] || gp('play_order') || '0', 10) || 0));
+    swing = Math.max(0, Math.min(127, parseInt(gp('swing') || '0', 10) || 0));
+    trackFollow = parseInt(gp('track_follow') || '1', 10) !== 0;
+    trackStart = Math.max(0, Math.min(63, parseInt(gp('track_start') || '0', 10) || 0));
+    trackLen = Math.max(1, Math.min(64 - trackStart, parseInt(gp('track_len') || '16', 10) || 16));
+    trackRotate = Math.max(0, Math.min(63, parseInt(gp('track_rotate') || '0', 10) || 0));
+    trackDiv = Math.max(1, Math.min(8, parseInt(gp('track_div') || '1', 10) || 1));
     machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
@@ -429,11 +437,33 @@ function setPlayOrder(next) {
     announceParameter('Play order', PLAY_ORDERS[playOrder]);
 }
 
+function setSwing(next) {
+    swing = Math.max(0, Math.min(127, next));
+    host_module_set_param('swing', `${swing}`);
+    needsRedraw = true;
+    announceParameter('Swing', `${50 + Math.round(swing * 25 / 127)} percent`);
+}
+
+function setTrackTiming(key, value, label) {
+    host_module_set_param(key, `${value}`);
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announceParameter(label, `${value}`);
+}
+
 function adjustSeqSetup(i, delta) {
+    focusBank = i >= 4 ? 1 : 0;
     if (i === 0) setPatternStart(patternStart + delta);
     else if (i === 1) setPatternLength(patternLen + delta);
     else if (i === 2) setPlayOrder(playOrder + delta);
-    else if (i === 3) setStepPage(stepPage + delta);
+    else if (i === 3) setSwing(swing + delta);
+    else if (shiftActive()) {
+        host_module_set_param('track_follow', '1');
+        fetchAll(); paintSteps(false); needsRedraw = true;
+        announce(`Track ${track + 1} follows global window`);
+    } else if (i === 4) setTrackTiming('track_start', Math.max(0, Math.min(63, trackStart + delta)), 'Track start');
+    else if (i === 5) setTrackTiming('track_len', Math.max(1, Math.min(64 - trackStart, trackLen + delta)), 'Track length');
+    else if (i === 6) setTrackTiming('track_rotate', (trackRotate + delta + 64) % 64, 'Track rotation');
+    else if (i === 7) setTrackTiming('track_div', Math.max(1, Math.min(8, trackDiv + delta)), 'Track division');
 }
 
 function cycleMachine(delta) {
@@ -460,10 +490,12 @@ function adjust(i, delta) {
     if (heldStep) {
         heldStep.used = true;
         const absoluteParam = (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i;
-        if (deleteHeld)
+        if (deleteHeld) {
+            deleteUsed = true;
             host_module_set_param('unlock', `${track}:${heldStep.step}:${absoluteParam}:0`);
-        else
+        } else {
             host_module_set_param('lock', `${track}:${heldStep.step}:${absoluteParam}:${v}`);
+        }
         parseSteps(); paintSteps(false);
     } else {
         host_module_set_param(shiftLayer() ? `alt${i + 1}` : `p${i + 1}`, `${v}`);
@@ -503,9 +535,11 @@ function paintSteps(force) {
     for (let i = 0; i < 16; i++) {
         const absolute = stepPage * 16 + i;
         if (seqSetup) {
-            const inWindow = absolute >= patternStart && absolute < patternStart + patternLen;
+            const shownStart = focusBank && !trackFollow ? trackStart : patternStart;
+            const shownLen = focusBank && !trackFollow ? trackLen : patternLen;
+            const inWindow = absolute >= shownStart && absolute < shownStart + shownLen;
             let c = inWindow ? Green : 0x10;
-            if (absolute === patternStart) c = White;
+            if (absolute === shownStart) c = White;
             if (absolute === playStep) c = BrightRed;
             setLED(STEP_FIRST + i, c, force);
             continue;
@@ -558,18 +592,22 @@ function drawPresetBrowser() {
 
 function drawSeqSetup() {
     clear_screen();
-    drawHeader('MONO · SEQ SETUP');
-    const labels = ['START', 'LENGTH', 'ORDER', 'PAGE'];
+    drawHeader(`MONO · ${focusBank ? `T${track + 1} TIMING` : 'GLOBAL SEQ'}`);
+    const labels = ['START', 'LENGTH', 'ORDER', 'SWING', 'TSTART', 'TLEN', 'ROTATE', 'DIV'];
     const shown = [String(patternStart + 1).padStart(2, '0'),
         String(patternLen).padStart(2, '0'), PLAY_ORDER_SCREEN[playOrder],
-        `${stepPage + 1}/4`];
-    for (let i = 0; i < 4; i++) {
-        const x = i * 32 + 2;
+        `${50 + Math.round(swing * 25 / 127)}%`,
+        trackFollow ? 'GLOBAL' : String(trackStart + 1).padStart(2, '0'),
+        trackFollow ? 'GLOBAL' : String(trackLen).padStart(2, '0'),
+        String(trackRotate).padStart(2, '0'), `1/${trackDiv}`];
+    const first = focusBank * 4;
+    for (let column = 0; column < 4; column++) {
+        const i = first + column, x = column * 32 + 2;
         print(x, 18, labels[i], 1);
         print(x, 34, shown[i], 1);
     }
-    drawFooter({left: `END ${String(patternStart + patternLen).padStart(2, '0')}`,
-                right: 'Step=start · Back'});
+    drawFooter({left: focusBank ? 'Shift+turn: global' : `END ${String(patternStart + patternLen).padStart(2, '0')}`,
+                right: `K${first + 1}-${first + 4} · Step=start`});
     needsRedraw = false;
 }
 
@@ -615,7 +653,7 @@ globalThis.onMidiMessageInternal = function(data) {
             if (d1 === MoveBack && d2 > 0) { closeSeqSetup(); return; }
             if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
             if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
-            if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 4) {
+            if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) {
                 const d = decodeDelta(d2); if (d) adjustSeqSetup(d1 - MoveKnob1, d); return;
             }
             return;
@@ -646,7 +684,41 @@ globalThis.onMidiMessageInternal = function(data) {
             if (d1 === MoveBack && d2 > 0) { closePresetBrowser(); return; }
             return;
         }
-        if (d1 === MoveDelete) { deleteHeld = d2 > 0; needsRedraw = true; return; }
+        if (d1 === MoveCopy && d2 > 0) {
+            if (heldStep) {
+                heldStep.used = true;
+                if (shiftActive()) {
+                    host_module_set_param('paste_step', `${track}:${heldStep.step}`);
+                    announce(`Pasted step ${heldStep.step + 1}`);
+                } else {
+                    host_module_set_param('copy_step', `${track}:${heldStep.step}`);
+                    announce(`Copied step ${heldStep.step + 1}`);
+                }
+            } else if (shiftActive()) {
+                host_module_set_param('paste_track', `${track}`);
+                fetchAll(); paintAll(false); announce(`Pasted track ${track + 1}`);
+            } else {
+                host_module_set_param('copy_track', `${track}`);
+                announce(`Copied track ${track + 1}`);
+            }
+            needsRedraw = true; return;
+        }
+        if (d1 === MoveUndo && d2 > 0) {
+            host_module_set_param('undo', '1');
+            fetchAll(); paintAll(false); needsRedraw = true; announce('Undo'); return;
+        }
+        if (d1 === MoveDelete) {
+            if (d2 > 0) { deleteHeld = true; deleteUsed = false; }
+            else {
+                if (heldStep && !deleteUsed) {
+                    host_module_set_param('clear_step', `${track}:${heldStep.step}`);
+                    heldStep.used = true; parseSteps(); paintSteps(false);
+                    announce(`Cleared step ${heldStep.step + 1}`);
+                }
+                deleteHeld = false; deleteUsed = false;
+            }
+            needsRedraw = true; return;
+        }
         if (d1 === MoveMainButton && d2 > 0 && shiftActive()) {
             openPresetBrowser();
             return;
@@ -682,8 +754,13 @@ globalThis.onMidiMessageInternal = function(data) {
 
     if (status === 0x90 && d2 > 0) {
         if (seqSetup) {
+            for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) {
+                selectTrack(i); focusBank = 1; needsRedraw = true; return;
+            }
             if (d1 >= STEP_FIRST && d1 < STEP_FIRST + STEP_COUNT) {
-                setPatternStart(stepPage * 16 + d1 - STEP_FIRST);
+                const start = stepPage * 16 + d1 - STEP_FIRST;
+                if (focusBank) setTrackTiming('track_start', start, 'Track start');
+                else setPatternStart(start);
                 return;
             }
             if (d1 === PAD_TRANSPORT) {
