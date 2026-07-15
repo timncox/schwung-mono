@@ -29,12 +29,15 @@ Every track also has an AHDR envelope, dual-cutoff resonant filter,
 distortion, EQ, sample-rate reduction, stereo filtered delay, portamento,
 pan, and three assignable LFOs.
 
-On the SYNTH page, hold Shift while turning knobs 1–8 to open the secondary
-machine layer. The first four controls are machine-specific; the last four are
-Drift, Fold, Bits, and Noise. Shift + jog continues to change machines.
+Hold Shift while turning knobs 1–8 on any sound page to open its secondary
+bank. SYNTH adds machine-specific controls plus Drift, Fold, Bits, and Noise;
+AMP adds envelope curves and performance response; FILTER adds tracking,
+drive, slopes, mix, and saturation; EFFECT adds deeper EQ and delay shaping;
+each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key
+tracking. Shift + jog continues to change machines.
 
-Each LFO has 66 named destinations: Off, Pitch, and every one of the 64 sound
-parameters. That includes the synthesis and Shift layers, envelopes, filters,
+Each LFO has 114 named destinations: Off, Pitch, and every one of the 112 sound
+parameters. That includes all primary and Shift banks, envelopes, filters,
 effects, and every setting on all three LFOs. LFO-to-LFO and self-modulation
 use a bounded one-sample feedback path so recursive routings stay stable.
 On Move, destination readouts use compact five-character names that stay in
@@ -97,7 +100,7 @@ scripts/deploy.sh
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
 - Knobs 1-8: edit the current page
-- Shift + knobs 1-8 on SYNTH: edit the secondary machine layer
+- Shift + knobs 1-8: edit the current page's secondary bank
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
 - Move Record: arm/disarm live knob-lock recording during playback

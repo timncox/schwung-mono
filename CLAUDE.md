@@ -20,8 +20,8 @@ content. Version 0.1 is a playable architectural slice, not a bit-exact clone.
 
 ## Engine
 
-Each track owns one monophonic voice, 64 base/effective parameters (seven
-pages of eight plus an eight-control Shift synthesis layer), three LFOs,
+Each track owns one monophonic voice, 112 base/effective parameters (seven
+pages of eight plus an eight-control Shift bank for every page), three LFOs,
 amp/filter envelopes, dual state-variable filters,
 sample-rate reduction, distortion, a filtered stereo delay, and 64 sequencer
 steps. The initial machine set is:
@@ -43,17 +43,26 @@ milestones.
 - Shift + SYNTH: four additional machine-specific controls plus drift, fold,
   bit depth, and noise.
 - 1 AMP: attack, hold, decay, release, distortion, volume, pan, portamento.
+- Shift + AMP: envelope curves, velocity response, key level, envelope amount,
+  pan key tracking, and gain.
 - 2 FILTER: base, width, HP resonance, LP resonance, envelope attack,
   envelope decay, envelope base, envelope width.
+- Shift + FILTER: key/velocity tracking, envelope amount, pre-drive, HP/LP
+  slopes, dry/wet mix, and saturation.
 - 3 EFFECT: EQ frequency/gain, sample-rate, delay send/time/feedback/base/width.
+- Shift + EFFECT: EQ Q/mix, bit depth, ping-pong, delay duck/drive, and delay
+  modulation rate/depth.
 - 4-6 LFO 1-3: destination, trigger mode, waveform, multiplier, speed,
   interlace, depth, phase.
+- Shift + LFO 1-3: fade, delay, slew, symmetry, steps, polarity, velocity
+  response, and key tracking.
 
-Each LFO destination is a direct 0-65 enum: Off, Pitch, then parameter IDs
-0-63. Modulation of LFO parameters is fed into the following sample and
+Each LFO destination is a direct 0-113 enum: Off, Pitch, then parameter IDs
+0-111. Modulation of LFO parameters is fed into the following sample and
 clamped, allowing cross- and self-modulation without recursive evaluation.
-State v4 stores this direct map; v2/v3 seven-destination presets migrate on
-load.
+State v5 stores this direct map and packs 112-bit lock masks and 7-bit lock
+values compactly. State v2-v4 patches migrate on load; v2/v3 seven-destination
+LFO routings are translated to the direct map.
 
 The engine keeps Trigger and Wave in their original 0-127 state slots, split
 into five equal bands. Custom Move and browser UIs present those bands as
@@ -62,14 +71,15 @@ five-character destination labels prevent values from spilling into adjacent
 Move screen columns without changing the saved-state format.
 
 The sound-generator manifest exposes stable `synN`, `ampN`, `fltN`, `fxN`,
-and `lfoX_N` keys. Secondary synthesis controls use stable `syn9`...`syn16`
-and `alt1`...`alt8` aliases. The overtake UI exposes the selected page through
-dynamic `p1`...`p8` aliases.
+and `lfoX_N` keys, including numbered 9-16 keys for every secondary bank.
+Dynamic `alt1`...`alt8` aliases expose the selected page's Shift bank. The
+overtake UI exposes the selected primary page through dynamic `p1`...`p8`
+aliases.
 
 ## Sequencer
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
-independent note/amp/filter/LFO trigger bits, and locks for any of the 64 sound
+independent note/amp/filter/LFO trigger bits, and locks for any of the 112 sound
 parameters. On each trig, effective parameters reset to the track's base values
 and then apply that step's locks. MIDI clock advances at six ticks per 16th;
 the engine falls back to `host->get_bpm()` when its own transport is running

@@ -837,7 +837,7 @@
           <div class="start-step"><div><b>Add Mono Voice</b><span>Load <code>mono-voice</code> into a normal Move track.</span></div></div>
           <div class="start-step"><div><b>Play normally</b><span>Use Move's pads and sequencer exactly as you would with another sound generator.</span></div></div>
           <div class="start-step"><div><b>Pick a page</b><span>Turn the jog wheel, or use the left and right arrows, to move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div></div>
-          <div class="start-step"><div><b>Pick a machine or deeper control</b><span>Hold <kbd>Shift</kbd> and turn the jog wheel to change machine. Hold <kbd>Shift</kbd> while turning knobs 1–8 to edit that machine's secondary synthesis layer.</span></div></div>
+          <div class="start-step"><div><b>Pick a machine or deeper control</b><span>Hold <kbd>Shift</kbd> and turn the jog wheel to change machine. Hold <kbd>Shift</kbd> while turning knobs 1–8 on any page to edit its secondary bank.</span></div></div>
         </div>
       </div>
     </div>
@@ -934,7 +934,7 @@
           </div>
         </div>
       </div>
-      <div class="warning"><b>Shift synthesis</b><span>On the SYNTH page, hold Shift and turn any parameter knob for eight additional machine controls. The first four change with the machine; knobs 5–8 are Drift, Fold, Bits, and Noise. Each LFO can target Pitch or any of the 64 sound parameters—including settings on the other LFOs—and shows the destination by name. Trigger and Wave step through five named choices instead of raw numbers.</span></div>
+      <div class="warning"><b>Shift banks</b><span>Hold Shift and turn any parameter knob on any page for eight additional controls. SYNTH adds machine controls; AMP adds envelope curves and response; FILTER adds tracking, slopes, drive, mix, and saturation; EFFECT adds deeper EQ and delay shaping; each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key tracking. Every LFO can target Pitch or any of the 112 sound parameters.</span></div>
     </div>
   </section>
 
@@ -998,7 +998,7 @@
           <div class="ref-row"><b>Sequence Setup</b><span>Knobs 1–4 set playback start, length, Forward/Reverse/Pendulum/Random order, and visible step page. Tap a Step key to choose the start.</span></div>
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
-          <div class="ref-row"><b>Shift + knobs</b><span>On SYNTH, edit the selected machine's secondary eight-control layer.</span></div>
+          <div class="ref-row"><b>Shift + knobs</b><span>Edit the current page's secondary eight-control bank.</span></div>
           <div class="ref-row"><b>Record</b><span>Arm live parameter-lock capture. Start the internal sequencer and turn knobs; continuous values glide between recorded steps.</span></div>
         </div>
         <div class="ref-panel">
@@ -1008,7 +1008,7 @@
           <div class="ref-row"><b>Jog wheel</b><span>Move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Previous or next parameter page.</span></div>
           <div class="ref-row"><b>Shift + jog</b><span>Change synthesis machine.</span></div>
-          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls for the current machine.</span></div>
+          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls for the current page.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page; the display follows knobs 1–4 or 5–8 as you touch them.</span></div>
           <div class="ref-row"><b>Record</b><span>Arm Mono automation while Move plays or records. Notes remain in the Move clip; clocked knob locks live in Mono Voice.</span></div>
           <div class="ref-row"><b>Track effects</b><span>Mono Voice still sits inside a normal Move track and its surrounding workflow.</span></div>
@@ -1032,14 +1032,14 @@
           <h3>Which archive?</h3>
           <p><code>mono-module.tar.gz</code><br>Full-surface, six-track instrument.</p>
           <p><code>mono-voice-module.tar.gz</code><br>Single sound generator for a normal Move track.</p>
-          <p>Source and public release publishing are the next project step.</p>
+          <p>Source and the latest manual live in <a href="https://github.com/timncox/schwung-mono">the Schwung Mono repository</a>.</p>
         </div>
       </div>
       <div class="specs">
         <div class="spec"><b>Machines</b><span>6 digital</span></div>
         <div class="spec"><b>Tracks</b><span>6 / 1</span></div>
         <div class="spec"><b>Pattern</b><span>64 steps</span></div>
-        <div class="spec"><b>Pages</b><span>7 × 8</span></div>
+        <div class="spec"><b>Controls</b><span>7 × 16</span></div>
         <div class="spec"><b>Modulators</b><span>3 LFOs</span></div>
         <div class="spec"><b>License</b><span>MIT</span></div>
       </div>
@@ -1080,6 +1080,15 @@
     ['WAVE2','BLEND','DETUN','OCT','DRIFT','FOLD','BITS','NOISE'],
     ['2FINE','2FB','3FRQ','3LVL','DRIFT','FOLD','BITS','NOISE']
   ];
+  const PAGE_SHIFT_PARAMS = [
+    null,
+    ['ACRV','DCRV','RCRV','VEL','KLVL','EAMT','PKEY','GAIN'],
+    ['KTRK','V2F','EAMT','FDRV','HPSLP','LPSLP','MIX','SAT'],
+    ['EQQ','EQMIX','BITS','PING','DUCK','DDRV','DMODR','DMODD'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY']
+  ];
 
   let currentPage = 0;
   let currentMachine = 0;
@@ -1093,17 +1102,32 @@
     'LFO 1 DEST','LFO 1 TRIGGER','LFO 1 WAVE','LFO 1 MULT','LFO 1 SPEED','LFO 1 INTERLACE','LFO 1 DEPTH','LFO 1 PHASE',
     'LFO 2 DEST','LFO 2 TRIGGER','LFO 2 WAVE','LFO 2 MULT','LFO 2 SPEED','LFO 2 INTERLACE','LFO 2 DEPTH','LFO 2 PHASE',
     'LFO 3 DEST','LFO 3 TRIGGER','LFO 3 WAVE','LFO 3 MULT','LFO 3 SPEED','LFO 3 INTERLACE','LFO 3 DEPTH','LFO 3 PHASE',
-    'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BIT DEPTH','NOISE'
+    'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BIT DEPTH','NOISE',
+    'AMP ATTACK CURVE','AMP DECAY CURVE','AMP RELEASE CURVE','AMP VELOCITY','AMP KEY LEVEL','AMP ENV AMOUNT','AMP PAN KEY TRACK','AMP GAIN',
+    'FILTER KEY TRACK','FILTER VELOCITY','FILTER ENV AMOUNT','FILTER DRIVE','HP SLOPE','LP SLOPE','FILTER MIX','FILTER SATURATION',
+    'EFFECT EQ Q','EFFECT EQ MIX','EFFECT BIT DEPTH','EFFECT PING PONG','EFFECT DELAY DUCK','EFFECT DELAY DRIVE','EFFECT DELAY MOD RATE','EFFECT DELAY MOD DEPTH',
+    'LFO 1 FADE','LFO 1 DELAY','LFO 1 SLEW','LFO 1 SYMMETRY','LFO 1 STEPS','LFO 1 POLARITY','LFO 1 VELOCITY','LFO 1 KEY TRACK',
+    'LFO 2 FADE','LFO 2 DELAY','LFO 2 SLEW','LFO 2 SYMMETRY','LFO 2 STEPS','LFO 2 POLARITY','LFO 2 VELOCITY','LFO 2 KEY TRACK',
+    'LFO 3 FADE','LFO 3 DELAY','LFO 3 SLEW','LFO 3 SYMMETRY','LFO 3 STEPS','LFO 3 POLARITY','LFO 3 VELOCITY','LFO 3 KEY TRACK'
   ];
   const LFO_MODE_VALUES = [0,32,64,96,127];
   const LFO_TRIGGER_NAMES = ['FREE','RETRIGGER','HOLD','ONE SHOT','HALF SHOT'];
   const LFO_WAVE_NAMES = ['SINE','SAW','TRIANGLE','SQUARE','RANDOM'];
   const values = Array.from({ length: 7 }, (_, p) => Array.from({ length: 8 }, (_, i) =>
     p === 0 ? [76,18,32,0,0,0,0,64][i] : (p >= 4 && i === 0 ? 0 : 64)));
-  const shiftValues = [
+  const synthShiftValues = [
     [0,21,64,0,0,0,0,0], [64,21,0,0,0,0,0,0],
     [127,127,127,127,0,0,0,0], [0,0,0,0,0,0,0,0],
     [0,0,64,64,0,0,0,0], [64,0,34,0,0,0,0,0]
+  ];
+  const pageShiftValues = [
+    null,
+    [64,64,64,127,64,127,64,64],
+    [0,64,127,0,127,127,127,0],
+    [64,127,0,0,0,0,32,0],
+    [0,0,0,64,0,127,0,64],
+    [0,0,0,64,0,127,0,64],
+    [0,0,0,64,0,127,0,64]
   ];
 
   document.querySelectorAll('.mode-tab').forEach(tab => {
@@ -1181,7 +1205,7 @@
   const inspectExtras = {
     jog: ['NAVIGATION', 'JOG', 'PARAMETER PAGE', 'Turn the jog wheel to cycle through SYNTH, AMP, FILTER, EFFECT, LFO 1, LFO 2, and LFO 3.'],
     arrows: ['SEQUENCER', '← / →', 'STEP PAGE', 'Select one of four 16-step pages: 1–16, 17–32, 33–48, or 49–64.'],
-    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On SYNTH, Shift plus knobs edits eight additional machine controls. Shift plus jog changes machine. Shift plus top-row pad 8 opens Sequence Setup. While holding a step, Shift plus a knob turn removes that parameter lock.'],
+    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On every sound page, Shift plus knobs edits eight additional controls. Shift plus jog changes machine. Shift plus top-row pad 8 opens Sequence Setup. While holding a step, Shift plus a knob turn removes that parameter lock.'],
     voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages; Shift plus jog changes the machine.']
   };
   document.querySelectorAll('[data-inspect]').forEach(button => button.addEventListener('click', () => inspect(...inspectExtras[button.dataset.inspect])));
@@ -1193,7 +1217,7 @@
     button.type = 'button';
     button.className = 'page-button' + (index === 0 ? ' active' : '');
     button.textContent = `${String(index + 1).padStart(2,'0')} ${page.name}`;
-    button.addEventListener('click', () => { currentPage = index; if (index !== 0) editorShift = false; renderEditor(); });
+    button.addEventListener('click', () => { currentPage = index; renderEditor(); });
     pageRail.appendChild(button);
   });
   MACHINES.forEach((machine, index) => {
@@ -1206,12 +1230,18 @@
   });
   document.getElementById('editor-shift').addEventListener('click', () => { editorShift = !editorShift; renderEditor(); });
 
-  function editorShiftActive() { return currentPage === 0 && editorShift; }
-  function activeParams() { return currentPage === 0 ? (editorShiftActive() ? SHIFT_PARAMS[currentMachine] : MACHINES[currentMachine].params) : PAGES[currentPage].params; }
-  function activeEditorValues() { return editorShiftActive() ? shiftValues[currentMachine] : values[currentPage]; }
-  function isEditorLfoDestination(i) { return currentPage >= 4 && i === 0; }
-  function isEditorLfoTrigger(i) { return currentPage >= 4 && i === 1; }
-  function isEditorLfoWave(i) { return currentPage >= 4 && i === 2; }
+  function editorShiftActive() { return editorShift; }
+  function activeParams() {
+    if (!editorShiftActive()) return currentPage === 0 ? MACHINES[currentMachine].params : PAGES[currentPage].params;
+    return currentPage === 0 ? SHIFT_PARAMS[currentMachine] : PAGE_SHIFT_PARAMS[currentPage];
+  }
+  function activeEditorValues() {
+    if (!editorShiftActive()) return values[currentPage];
+    return currentPage === 0 ? synthShiftValues[currentMachine] : pageShiftValues[currentPage];
+  }
+  function isEditorLfoDestination(i) { return !editorShiftActive() && currentPage >= 4 && i === 0; }
+  function isEditorLfoTrigger(i) { return !editorShiftActive() && currentPage >= 4 && i === 1; }
+  function isEditorLfoWave(i) { return !editorShiftActive() && currentPage >= 4 && i === 2; }
   function isEditorLfoMode(i) { return isEditorLfoTrigger(i) || isEditorLfoWave(i); }
   function editorLfoModeIndex(value) {
     const raw = Math.max(0, Math.min(127, Math.round(value)));
@@ -1228,9 +1258,8 @@
     document.querySelectorAll('.machine-button').forEach((b, i) => b.classList.toggle('active', i === currentMachine));
     document.getElementById('editor-page').textContent = PAGES[currentPage].name;
     document.getElementById('editor-machine').textContent = MACHINES[currentMachine].name;
-    document.getElementById('editor-desc').textContent = editorShiftActive() ? 'Secondary machine controls: hold Shift while turning knobs on Move.' : (currentPage === 0 ? MACHINES[currentMachine].desc : PAGES[currentPage].desc);
+    document.getElementById('editor-desc').textContent = editorShiftActive() ? `Secondary ${PAGES[currentPage].name} controls: hold Shift while turning knobs on Move.` : (currentPage === 0 ? MACHINES[currentMachine].desc : PAGES[currentPage].desc);
     const shiftButton = document.getElementById('editor-shift');
-    shiftButton.hidden = currentPage !== 0;
     shiftButton.classList.toggle('active', editorShiftActive());
     shiftButton.textContent = editorShiftActive() ? 'SHIFT LAYER / ON' : 'SHIFT LAYER / OFF';
     const params = activeParams();

@@ -24,7 +24,13 @@ const LFO_DESTS = [
     'L1 DEST','L1 TRIG','L1 WAVE','L1 MULT','L1 SPEED','L1 INTL','L1 DEPTH','L1 PHASE',
     'L2 DEST','L2 TRIG','L2 WAVE','L2 MULT','L2 SPEED','L2 INTL','L2 DEPTH','L2 PHASE',
     'L3 DEST','L3 TRIG','L3 WAVE','L3 MULT','L3 SPEED','L3 INTL','L3 DEPTH','L3 PHASE',
-    'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BITS','NOISE'
+    'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BITS','NOISE',
+    'AMP A CURVE','AMP D CURVE','AMP R CURVE','VELOCITY','KEY LEVEL','ENV AMOUNT','PAN KEY','GAIN',
+    'FILTER KEY','VELOCITY TO FILTER','FILTER ENV AMOUNT','FILTER DRIVE','HP SLOPE','LP SLOPE','FILTER MIX','FILTER SAT',
+    'EQ Q','EQ MIX','BIT DEPTH','DELAY PING PONG','DELAY DUCK','DELAY DRIVE','DELAY MOD RATE','DELAY MOD DEPTH',
+    'LFO 1 FADE','LFO 1 DELAY','LFO 1 SLEW','LFO 1 SYMMETRY','LFO 1 STEPS','LFO 1 POLARITY','LFO 1 VELOCITY','LFO 1 KEY TRACK',
+    'LFO 2 FADE','LFO 2 DELAY','LFO 2 SLEW','LFO 2 SYMMETRY','LFO 2 STEPS','LFO 2 POLARITY','LFO 2 VELOCITY','LFO 2 KEY TRACK',
+    'LFO 3 FADE','LFO 3 DELAY','LFO 3 SLEW','LFO 3 SYMMETRY','LFO 3 STEPS','LFO 3 POLARITY','LFO 3 VELOCITY','LFO 3 KEY TRACK'
 ];
 /* The Move screen gives each knob a 32 px column (five glyphs). Keep a
  * separate compact destination table so long names never overwrite the next
@@ -38,7 +44,13 @@ const LFO_DEST_SCREEN = [
     'L1DST','L1TRG','L1WAV','L1MUL','L1SPD','L1INT','L1DEP','L1PHS',
     'L2DST','L2TRG','L2WAV','L2MUL','L2SPD','L2INT','L2DEP','L2PHS',
     'L3DST','L3TRG','L3WAV','L3MUL','L3SPD','L3INT','L3DEP','L3PHS',
-    'ALT1','ALT2','ALT3','ALT4','DRIFT','FOLD','BITS','NOISE'
+    'ALT1','ALT2','ALT3','ALT4','DRIFT','FOLD','BITS','NOISE',
+    'ACRV','DCRV','RCRV','VEL','KLVL','EAMT','PKEY','GAIN',
+    'KTRK','V2F','FEAMT','FDRV','HPSLP','LPSLP','FMIX','FSAT',
+    'EQQ','EQMIX','BITS','PING','DUCK','DDRV','DMODR','DMODD',
+    'L1FAD','L1DLY','L1SLW','L1SYM','L1STP','L1POL','L1VEL','L1KEY',
+    'L2FAD','L2DLY','L2SLW','L2SYM','L2STP','L2POL','L2VEL','L2KEY',
+    'L3FAD','L3DLY','L3SLW','L3SYM','L3STP','L3POL','L3VEL','L3KEY'
 ];
 const LFO_MODE_VALUES = [0, 32, 64, 96, 127];
 const LFO_TRIGGER_NAMES = ['Free', 'Retrigger', 'Hold', 'One Shot', 'Half Shot'];
@@ -71,6 +83,14 @@ const SYNTH_SHIFT = [
     ['RING','SUB','MODMX','CHAOS','DRIFT','FOLD','BITS','NOISE'],
     ['WAVE2','BLEND','DETUN','OCT','DRIFT','FOLD','BITS','NOISE'],
     ['2FINE','2FB','3FRQ','3LVL','DRIFT','FOLD','BITS','NOISE']
+];
+const COMMON_SHIFT = [null,
+    ['ACRV','DCRV','RCRV','VEL','KLVL','EAMT','PKEY','GAIN'],
+    ['KTRK','V2F','EAMT','FDRV','HPSLP','LPSLP','MIX','SAT'],
+    ['EQQ','EQMIX','BITS','PING','DUCK','DDRV','DMODR','DMODD'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY'],
+    ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY']
 ];
 
 const TRACK_PADS = [92, 93, 94, 95, 96, 97];
@@ -195,12 +215,13 @@ function shiftActive() {
         return true;
     return shift;
 }
-function shiftLayer() { return page === 0 && shiftActive() && !heldStep; }
-function names() { return page === 0 ? (shiftLayer() ? SYNTH_SHIFT[machine] : SYNTH[machine]) : COMMON[page]; }
+function shiftLayer() { return shiftActive() && !heldStep; }
+function names() { return shiftLayer() ? (page === 0 ? SYNTH_SHIFT[machine] : COMMON_SHIFT[page])
+                                      : (page === 0 ? SYNTH[machine] : COMMON[page]); }
 function activeValues() { return shiftLayer() ? altValues : values; }
-function isLfoDestination(i) { return page >= 4 && i === 0; }
-function isLfoTrigger(i) { return page >= 4 && i === 1; }
-function isLfoWave(i) { return page >= 4 && i === 2; }
+function isLfoDestination(i) { return !shiftLayer() && page >= 4 && i === 0; }
+function isLfoTrigger(i) { return !shiftLayer() && page >= 4 && i === 1; }
+function isLfoWave(i) { return !shiftLayer() && page >= 4 && i === 2; }
 function isLfoMode(i) { return isLfoTrigger(i) || isLfoWave(i); }
 function destinationIndex(value) { return Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value))); }
 function lfoModeIndex(value) {
@@ -403,7 +424,7 @@ function draw() {
         print(x, 18, n[i], 1);
         print(x, 34, displayValue(i, shown[i]), 1);
     }
-    drawFooter({left: `${shiftLayer() ? 'SHIFT SYN' : PAGES[page]} K${first + 1}-${first + 4}`,
+    drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
                 right: heldStep ? (shiftActive() ? 'turn=unlock' : 'turn=lock')
                     : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
     needsRedraw = false;

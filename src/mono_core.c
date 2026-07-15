@@ -44,7 +44,9 @@ typedef struct {
 typedef struct {
     float phase;
     float held;
+    float slewed;
     uint32_t rng;
+    uint32_t age_samples;
     int stopped;
 } mono_lfo_t;
 
@@ -53,7 +55,7 @@ typedef struct {
     uint8_t velocity;
     uint8_t gate;
     uint8_t trig_mask;
-    uint64_t lock_mask;
+    uint64_t lock_mask[MONO_LOCK_WORDS];
     uint8_t lock_values[MONO_PARAMS];
 } mono_step_t;
 
@@ -81,7 +83,7 @@ typedef struct {
     mono_lfo_t lfo[3];
     /* LFO-to-LFO modulation is fed into the next sample. This makes cross- and
      * self-modulation deterministic without recursively evaluating an LFO. */
-    float lfo_param_mod[3 * MONO_PAGE_PARAMS];
+    float lfo_param_mod[6 * MONO_PAGE_PARAMS];
     mono_svf_t hp[2];
     mono_svf_t lp[2];
     mono_svf_t eq;
@@ -93,6 +95,7 @@ typedef struct {
     float delay_lp[2];
     float delay_hp[2];
     float delay_hp_in[2];
+    float delay_mod_phase;
 } mono_track_t;
 
 struct mono {
@@ -136,12 +139,37 @@ static int iclamp(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+static int step_has_lock(const mono_step_t *s, int pid) {
+    return (s->lock_mask[pid / 64] & (UINT64_C(1) << (pid % 64))) != 0;
+}
+
+static int step_has_any_lock(const mono_step_t *s) {
+    for (int word = 0; word < MONO_LOCK_WORDS; ++word)
+        if (s->lock_mask[word]) return 1;
+    return 0;
+}
+
+static void step_set_lock(mono_step_t *s, int pid) {
+    s->lock_mask[pid / 64] |= UINT64_C(1) << (pid % 64);
+}
+
+static void step_clear_lock(mono_step_t *s, int pid) {
+    s->lock_mask[pid / 64] &= ~(UINT64_C(1) << (pid % 64));
+}
+
 static void changed(mono_t *m) {
     if (m) ++m->revision;
 }
 
 static int is_lfo_destination_param(int pid) {
     return pid >= 32 && pid < MONO_PRIMARY_PARAMS && ((pid - 32) % 8) == 0;
+}
+
+static int lfo_control_mod_index(int pid) {
+    if (pid >= 32 && pid < MONO_PRIMARY_PARAMS) return pid - 32;
+    int shifted = pid - (MONO_SHIFT_BASE + 4 * MONO_PAGE_PARAMS);
+    return shifted >= 0 && shifted < 3 * MONO_PAGE_PARAMS
+        ? 3 * MONO_PAGE_PARAMS + shifted : -1;
 }
 
 static int is_smoothable_param(const mono_track_t *t, int pid) {
@@ -159,11 +187,16 @@ static int is_smoothable_param(const mono_track_t *t, int pid) {
         int offset = (pid - 32) % MONO_PAGE_PARAMS;
         return offset == 4 || offset == 6 || offset == 7;
     }
-    if (pid >= MONO_ALT_BASE && pid < MONO_PARAMS) {
-        int offset = pid - MONO_ALT_BASE;
-        if (t->machine == MONO_SWAVE_PULSE && offset == 3) return 0;
-        if (t->machine == MONO_DIGIPRO_WAVE && (offset == 0 || offset == 3)) return 0;
-        if (t->machine == MONO_FM_STATIC && offset == 2) return 0;
+    if (pid >= MONO_SHIFT_BASE && pid < MONO_PARAMS) {
+        int shift_page = (pid - MONO_SHIFT_BASE) / MONO_PAGE_PARAMS;
+        int offset = (pid - MONO_SHIFT_BASE) % MONO_PAGE_PARAMS;
+        if (shift_page == 0) {
+            if (t->machine == MONO_SWAVE_PULSE && offset == 3) return 0;
+            if (t->machine == MONO_DIGIPRO_WAVE && (offset == 0 || offset == 3)) return 0;
+            if (t->machine == MONO_FM_STATIC && offset == 2) return 0;
+        }
+        if (shift_page == 2 && (offset == 4 || offset == 5)) return 0;
+        if (shift_page >= 4 && offset == 5) return 0;
         return 1;
     }
     return 0;
@@ -308,10 +341,19 @@ static void common_defaults(mono_track_t *t) {
     static const uint8_t flt[8] = { 0, 127, 0, 0, 0, 48, 64, 32 };
     static const uint8_t fx[8]  = { 64, 64, 127, 0, 48, 32, 0, 127 };
     static const uint8_t lfo[8] = { 0, 0, 0, 32, 32, 0, 0, 0 };
+    static const uint8_t amp_shift[8] = { 64, 64, 64, 127, 64, 127, 64, 64 };
+    static const uint8_t filter_shift[8] = { 0, 64, 127, 0, 127, 127, 127, 0 };
+    static const uint8_t effect_shift[8] = { 64, 127, 0, 0, 0, 0, 32, 0 };
+    static const uint8_t lfo_shift[8] = { 0, 0, 0, 64, 0, 127, 0, 64 };
     memcpy(t->base + 8, amp, 8);
     memcpy(t->base + 16, flt, 8);
     memcpy(t->base + 24, fx, 8);
     for (int p = 4; p < 7; ++p) memcpy(t->base + p * 8, lfo, 8);
+    memcpy(t->base + MONO_SHIFT_BASE + MONO_PAGE_PARAMS, amp_shift, 8);
+    memcpy(t->base + MONO_SHIFT_BASE + 2 * MONO_PAGE_PARAMS, filter_shift, 8);
+    memcpy(t->base + MONO_SHIFT_BASE + 3 * MONO_PAGE_PARAMS, effect_shift, 8);
+    for (int p = 4; p < 7; ++p)
+        memcpy(t->base + MONO_SHIFT_BASE + p * MONO_PAGE_PARAMS, lfo_shift, 8);
 }
 
 static void machine_defaults(mono_track_t *t, mono_machine_t machine) {
@@ -455,6 +497,8 @@ static float filter_env_tick(mono_env_t *e, const uint8_t *p, int sample_rate) {
 }
 
 static void lfo_trigger(mono_lfo_t *l, const uint8_t *p) {
+    l->age_samples = 0;
+    l->slewed = 0.0f;
     int mode = (p[1] * 5) / 128;
     if (mode != 0) {
         l->phase = pnorm(p[7]);
@@ -463,12 +507,15 @@ static void lfo_trigger(mono_lfo_t *l, const uint8_t *p) {
     }
 }
 
-static float lfo_tick(mono_lfo_t *l, const uint8_t *p, float bpm, int sample_rate) {
+static float lfo_tick(mono_lfo_t *l, const uint8_t *p, const uint8_t *x,
+                      float bpm, int sample_rate, int velocity, int note) {
     int wave = (p[2] * 5) / 128;
     int mode = (p[1] * 5) / 128;
     static const float mults[8] = { 0.125f, 0.25f, 0.5f, 1, 2, 4, 8, 16 };
     int mi = (p[3] * 8) / 128;
-    float hz = (bpm / 60.0f) * mults[mi] * (0.125f + 3.875f * pnorm(p[4]));
+    float key_scale = ((int)x[7] - 64) / 64.0f;
+    float key_rate = powf(2.0f, ((note - 60) / 12.0f) * key_scale);
+    float hz = (bpm / 60.0f) * mults[mi] * (0.125f + 3.875f * pnorm(p[4])) * key_rate;
     float old = l->phase;
     if (!l->stopped) {
         l->phase += hz / sample_rate;
@@ -476,13 +523,17 @@ static float lfo_tick(mono_lfo_t *l, const uint8_t *p, float bpm, int sample_rat
     }
     if (l->phase < old && wave == 4)
         l->held = ((xrnd(&l->rng) >> 8) / 8388607.5f) - 1.0f;
+    float symmetry = fclamp(0.5f + ((int)x[3] - 64) / 128.0f, 0.02f, 0.98f);
+    float shaped_phase = l->phase < symmetry
+        ? 0.5f * l->phase / symmetry
+        : 0.5f + 0.5f * (l->phase - symmetry) / (1.0f - symmetry);
     float v;
     switch (wave) {
-    case 1: v = saw(l->phase); break;
-    case 2: v = tri(l->phase); break;
-    case 3: v = l->phase < 0.5f ? 1.0f : -1.0f; break;
+    case 1: v = saw(shaped_phase); break;
+    case 2: v = tri(shaped_phase); break;
+    case 3: v = shaped_phase < 0.5f ? 1.0f : -1.0f; break;
     case 4: v = l->held; break;
-    default: v = sinf(2.0f * (float)M_PI * l->phase); break;
+    default: v = sinf(2.0f * (float)M_PI * shaped_phase); break;
     }
     if (mode == 2) {
         if (old == pnorm(p[7])) l->held = v;
@@ -494,7 +545,24 @@ static float lfo_tick(mono_lfo_t *l, const uint8_t *p, float bpm, int sample_rat
     }
     int interlace = p[5];
     if (interlace && ((int)(l->phase * (2 + interlace / 8)) & 1)) v = 0.0f;
-    return v * pnorm(p[6]);
+    if (x[4]) {
+        int levels = 2 + x[4] / 4;
+        v = roundf(v * (levels - 1)) / (levels - 1);
+    }
+    if (x[5] < 64) v = 0.5f * (v + 1.0f);
+    float slew = time_from_param(x[2], 2.0f);
+    if (slew > 0.0f)
+        l->slewed += (v - l->slewed) * (1.0f - expf(-1.0f / (slew * sample_rate)));
+    else
+        l->slewed = v;
+    float delay = time_from_param(x[1], 4.0f);
+    float fade = time_from_param(x[0], 8.0f);
+    float age = l->age_samples++ / (float)sample_rate;
+    float fade_gain = age < delay ? 0.0f
+        : (fade > 0.0f ? fclamp((age - delay) / fade, 0.0f, 1.0f) : 1.0f);
+    float velocity_mix = pnorm(x[6]);
+    float velocity_gain = 1.0f - velocity_mix + velocity_mix * velocity / 127.0f;
+    return l->slewed * pnorm(p[6]) * fade_gain * velocity_gain;
 }
 
 static void track_pitch(mono_track_t *t, int note, int velocity) {
@@ -801,7 +869,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     uint8_t targets[MONO_PARAMS];
     uint8_t unmodulated[MONO_PARAMS];
     uint8_t modulated[MONO_PARAMS];
-    float next_lfo_mod[3 * MONO_PAGE_PARAMS] = {0};
+    float next_lfo_mod[6 * MONO_PAGE_PARAMS] = {0};
     int target_pid[3] = {-1, -1, -1};
     float target_delta[3] = {0};
     memcpy(targets, t->effective, sizeof(targets));
@@ -813,8 +881,10 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
 
     /* LFO controls receive the previous sample's modulation while the current
      * outputs are evaluated. All other destinations are applied immediately. */
-    for (int pid = 32; pid < MONO_PRIMARY_PARAMS; ++pid) {
-        int value = (int)lrintf(unmodulated[pid] + t->lfo_param_mod[pid - 32]);
+    for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+        int mod_index = lfo_control_mod_index(pid);
+        if (mod_index < 0) continue;
+        int value = (int)lrintf(unmodulated[pid] + t->lfo_param_mod[mod_index]);
         int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
         modulated[pid] = (uint8_t)iclamp(value, 0, max);
     }
@@ -822,8 +892,10 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     float pitch_mod = 0.0f;
     for (int i = 0; i < 3; ++i) {
         const uint8_t *lp = modulated + (4 + i) * 8;
+        const uint8_t *lx = modulated + MONO_SHIFT_BASE + (4 + i) * MONO_PAGE_PARAMS;
         int dest = lfo_destination_index(lp[0]);
-        float v = lfo_tick(&t->lfo[i], lp, bpm, m->sample_rate);
+        float v = lfo_tick(&t->lfo[i], lp, lx, bpm, m->sample_rate,
+                           t->velocity, t->note >= 0 ? t->note : t->last_note);
         if (dest == 1) {
             pitch_mod += v * 24.0f;
         } else {
@@ -836,7 +908,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     }
 
     /* At most three params are targeted per sample. Accumulate duplicate
-     * routes without scanning all 64 params in the realtime path. */
+     * routes without scanning all 112 params in the realtime path. */
     for (int i = 0; i < 3; ++i) {
         int pid = target_pid[i];
         if (pid < 0) continue;
@@ -852,8 +924,8 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
         int value = (int)lrintf(unmodulated[pid] + delta);
         int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
         modulated[pid] = (uint8_t)iclamp(value, 0, max);
-        if (pid >= 32 && pid < MONO_PRIMARY_PARAMS)
-            next_lfo_mod[pid - 32] = delta;
+        int mod_index = lfo_control_mod_index(pid);
+        if (mod_index >= 0) next_lfo_mod[mod_index] = delta;
     }
     memcpy(t->lfo_param_mod, next_lfo_mod, sizeof(next_lfo_mod));
     memcpy(t->effective, modulated, sizeof(modulated));
@@ -880,14 +952,37 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     const uint8_t *ap = t->effective + 8;
     const uint8_t *fp = t->effective + 16;
     const uint8_t *ep = t->effective + 24;
+    const uint8_t *ax = t->effective + MONO_SHIFT_BASE + MONO_PAGE_PARAMS;
+    const uint8_t *fx = t->effective + MONO_SHIFT_BASE + 2 * MONO_PAGE_PARAMS;
+    const uint8_t *ex = t->effective + MONO_SHIFT_BASE + 3 * MONO_PAGE_PARAMS;
+    env_stage_t amp_stage = t->amp.stage;
     float aenv = amp_env_tick(&t->amp, ap, m->sample_rate);
-    float fenv = filter_env_tick(&t->filter_env, fp, m->sample_rate);
-    float vel = t->velocity / 127.0f;
+    int curve_param = amp_stage == ENV_ATTACK ? ax[0]
+        : (amp_stage == ENV_RELEASE ? ax[2] : ax[1]);
+    float curve_power = powf(4.0f, ((int)curve_param - 64) / 64.0f);
+    aenv = powf(fclamp(aenv, 0.0f, 1.0f), curve_power);
+    aenv = 1.0f - pnorm(ax[5]) + aenv * pnorm(ax[5]);
+    float fenv = filter_env_tick(&t->filter_env, fp, m->sample_rate) * pnorm(fx[2]);
+    float velocity_sensitivity = pnorm(ax[3]);
+    float vel = 1.0f - velocity_sensitivity +
+                velocity_sensitivity * t->velocity / 127.0f;
+    int performance_note = t->note >= 0 ? t->note : t->last_note;
+    float key_level = ((int)ax[4] - 64) / 64.0f;
+    float key_gain = powf(2.0f, ((performance_note - 60) / 12.0f) * key_level);
+    float trim_gain = powf(2.0f, ((int)ax[7] - 64) / 32.0f);
     float drive = 1.0f + pnorm(ap[4]) * 15.0f;
     x = tanhf(x * drive) / tanhf(drive);
-    x *= aenv * vel;
+    x *= aenv * vel * key_gain * trim_gain;
 
-    float base = fp[0] + (((int)fp[6] - 64) * fenv);
+    float filter_dry = x;
+    if (fx[3]) {
+        float filter_drive = 1.0f + pnorm(fx[3]) * 12.0f;
+        x = tanhf(x * filter_drive) / tanhf(filter_drive);
+    }
+    float filter_key = (performance_note - 60) * 1.062f * pnorm(fx[0]);
+    float filter_velocity = ((int)fx[1] - 64) *
+                            ((int)t->velocity - 64) / 127.0f;
+    float base = fp[0] + (((int)fp[6] - 64) * fenv) + filter_key + filter_velocity;
     float width = fp[1] + (((int)fp[7] - 64) * fenv);
     base = fclamp(base, 0.0f, 127.0f);
     width = fclamp(width, 0.0f, 127.0f);
@@ -895,13 +990,22 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     float lp_param = base + (127.0f - base) * (width / 127.0f);
     float lp_hz = cutoff_from_param(lp_param);
     x = svf(&t->hp[0], x, hp_hz, pnorm(fp[2]), m->sample_rate, 1);
-    x = svf(&t->hp[1], x, hp_hz, pnorm(fp[2]), m->sample_rate, 1);
+    if (fx[4] >= 64)
+        x = svf(&t->hp[1], x, hp_hz, pnorm(fp[2]), m->sample_rate, 1);
     x = svf(&t->lp[0], x, lp_hz, pnorm(fp[3]), m->sample_rate, 0);
-    x = svf(&t->lp[1], x, lp_hz, pnorm(fp[3]), m->sample_rate, 0);
+    if (fx[5] >= 64)
+        x = svf(&t->lp[1], x, lp_hz, pnorm(fp[3]), m->sample_rate, 0);
+    x = filter_dry + (x - filter_dry) * pnorm(fx[6]);
+    if (fx[7]) {
+        float saturation = 1.0f + pnorm(fx[7]) * 10.0f;
+        x = tanhf(x * saturation) / tanhf(saturation);
+    }
 
     float eq_hz = cutoff_from_param(ep[0]);
-    float band = svf(&t->eq, x, eq_hz, 0.4f, m->sample_rate, 0);
-    x += band * (((int)ep[1] - 64) / 64.0f);
+    float eq_q = fclamp(0.4f + ((int)ex[0] - 64) * (0.35f / 64.0f), 0.05f, 0.95f);
+    float band = svf(&t->eq, x, eq_hz, eq_q, m->sample_rate, 0);
+    float eq_wet = x + band * (((int)ep[1] - 64) / 64.0f);
+    x += (eq_wet - x) * pnorm(ex[1]);
 
     int hold = 1 + (127 - ep[2]) / 4;
     if (t->srr_left-- <= 0) {
@@ -909,9 +1013,16 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
         t->srr_left = hold;
     }
     x = t->srr_hold;
+    if (ex[2]) {
+        int bits = 16 - (ex[2] * 12) / 127;
+        float levels = (float)((1u << bits) - 1u);
+        x = roundf(x * levels) / levels;
+    }
 
     float volume = pnorm(ap[5]);
-    float pan = fclamp(((int)ap[6] - 64) / 64.0f, -1.0f, 1.0f);
+    float pan_key = ((performance_note - 60) / 24.0f) *
+                    (((int)ax[6] - 64) / 64.0f);
+    float pan = fclamp(((int)ap[6] - 64) / 64.0f + pan_key, -1.0f, 1.0f);
     float lg = sqrtf(0.5f * (1.0f - pan));
     float rg = sqrtf(0.5f * (1.0f + pan));
     float left = x * volume * lg;
@@ -921,10 +1032,15 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     float delay_p = ep[4];
     int offset = (int)((0.015f + 1.82f * delay_p / 127.0f) * m->sample_rate);
     offset = iclamp(offset, 1, delay_frames - 1);
-    int rp = t->delay_pos - offset;
-    if (rp < 0) rp += delay_frames;
-    float dl = t->delay[rp * 2];
-    float dr = t->delay[rp * 2 + 1];
+    phase_step(&t->delay_mod_phase, 0.02f + 5.0f * pnorm(ex[6]), m->sample_rate);
+    int mod_frames = (int)(sinf(2.0f * (float)M_PI * t->delay_mod_phase) *
+                           pnorm(ex[7]) * 0.025f * m->sample_rate);
+    int rp_l = t->delay_pos - iclamp(offset + mod_frames, 1, delay_frames - 1);
+    int rp_r = t->delay_pos - iclamp(offset - mod_frames, 1, delay_frames - 1);
+    if (rp_l < 0) rp_l += delay_frames;
+    if (rp_r < 0) rp_r += delay_frames;
+    float dl = t->delay[rp_l * 2];
+    float dr = t->delay[rp_r * 2 + 1];
     float hp_a = pnorm(ep[6]) * 0.995f;
     float lp_a = 0.02f + pnorm(ep[7]) * 0.975f;
     float d[2] = { dl, dr };
@@ -935,13 +1051,22 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
         t->delay_lp[c] += lp_a * (h - t->delay_lp[c]);
         d[c] = t->delay_lp[c];
     }
+    if (ex[5]) {
+        float delay_drive = 1.0f + pnorm(ex[5]) * 12.0f;
+        d[0] = tanhf(d[0] * delay_drive) / tanhf(delay_drive);
+        d[1] = tanhf(d[1] * delay_drive) / tanhf(delay_drive);
+    }
     float send = pnorm(ep[3]);
     float fb = fclamp(pnorm(ep[5]) * 1.08f, 0.0f, 1.08f);
-    t->delay[t->delay_pos * 2] = left * send + d[0] * fb;
-    t->delay[t->delay_pos * 2 + 1] = *right * send + d[1] * fb;
+    float ping = pnorm(ex[3]);
+    float fb_l = d[0] + (d[1] - d[0]) * ping;
+    float fb_r = d[1] + (d[0] - d[1]) * ping;
+    t->delay[t->delay_pos * 2] = left * send + fb_l * fb;
+    t->delay[t->delay_pos * 2 + 1] = *right * send + fb_r * fb;
     if (++t->delay_pos >= delay_frames) t->delay_pos = 0;
-    left += dl * send;
-    *right += dr * send;
+    float duck = 1.0f - pnorm(ex[4]) * aenv;
+    left += dl * send * duck;
+    *right += dr * send * duck;
     memcpy(t->effective, targets, sizeof(targets));
     return left;
 }
@@ -983,10 +1108,10 @@ void mono_advance_step(mono_t *m) {
     for (int ti = 0; ti < m->track_count; ++ti) {
         mono_track_t *t = &m->track[ti];
         mono_step_t *s = &t->steps[m->seq_step];
-        if (s->note < 0 && s->trig_mask == 0 && s->lock_mask == 0) continue;
+        if (s->note < 0 && s->trig_mask == 0 && !step_has_any_lock(s)) continue;
         memcpy(t->effective, t->base, MONO_PARAMS);
         for (int p = 0; p < MONO_PARAMS; ++p)
-            if (s->lock_mask & (UINT64_C(1) << p)) t->effective[p] = s->lock_values[p];
+            if (step_has_lock(s, p)) t->effective[p] = s->lock_values[p];
         track_trigger(m, t, s->note, s->velocity,
                       s->trig_mask ? s->trig_mask : (s->note >= 0 ? 15 : 0), s->gate);
     }
@@ -1093,12 +1218,20 @@ static int param_id(const mono_t *m, const char *key) {
     if (sscanf(key, "syn%d", &a) == 1 && a >= 9 && a <= 16)
         return MONO_ALT_BASE + a - 9;
     if (sscanf(key, "alt%d", &a) == 1 && a >= 1 && a <= MONO_ALT_PARAMS)
-        return MONO_ALT_BASE + a - 1;
+        return MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS + a - 1;
     if (sscanf(key, "amp%d", &a) == 1 && a >= 1 && a <= 8) return 8 + a - 1;
+    if (sscanf(key, "amp%d", &a) == 1 && a >= 9 && a <= 16)
+        return MONO_SHIFT_BASE + MONO_PAGE_PARAMS + a - 9;
     if (sscanf(key, "flt%d", &a) == 1 && a >= 1 && a <= 8) return 16 + a - 1;
+    if (sscanf(key, "flt%d", &a) == 1 && a >= 9 && a <= 16)
+        return MONO_SHIFT_BASE + 2 * MONO_PAGE_PARAMS + a - 9;
     if (sscanf(key, "fx%d", &a) == 1 && a >= 1 && a <= 8) return 24 + a - 1;
+    if (sscanf(key, "fx%d", &a) == 1 && a >= 9 && a <= 16)
+        return MONO_SHIFT_BASE + 3 * MONO_PAGE_PARAMS + a - 9;
     if (sscanf(key, "lfo%d_%d", &a, &b) == 2 && a >= 1 && a <= 3 && b >= 1 && b <= 8)
         return (3 + a) * 8 + b - 1;
+    if (sscanf(key, "lfo%d_%d", &a, &b) == 2 && a >= 1 && a <= 3 && b >= 9 && b <= 16)
+        return MONO_SHIFT_BASE + (3 + a) * MONO_PAGE_PARAMS + b - 9;
     if (sscanf(key, "p%d", &a) == 1 && a >= 1 && a <= 8)
         return m->selected_page * 8 + a - 1;
     return -1;
@@ -1137,6 +1270,7 @@ static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
     memset(t->delay_lp, 0, sizeof(t->delay_lp));
     memset(t->delay_hp, 0, sizeof(t->delay_hp));
     memset(t->delay_hp_in, 0, sizeof(t->delay_hp_in));
+    t->delay_mod_phase = 0.0f;
     if (t->delay)
         memset(t->delay, 0,
                (size_t)m->sample_rate * MONO_DELAY_SECONDS * 2 * sizeof(float));
@@ -1163,11 +1297,95 @@ static int read_hex(const char **cursor, const char *end, int digits,
     return 1;
 }
 
+static const char state64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static int state64_digit(char c) {
+    const char *p = strchr(state64, c);
+    return p ? (int)(p - state64) : -1;
+}
+
+static int mask_has_param(const uint64_t *mask, int pid) {
+    return (mask[pid / 64] & (UINT64_C(1) << (pid % 64))) != 0;
+}
+
+static int read_v5_mask(const char **cursor, const char *end, uint64_t *mask) {
+    memset(mask, 0, MONO_LOCK_WORDS * sizeof(*mask));
+    int chars = (MONO_PARAMS + 5) / 6;
+    if (end - *cursor < chars) return 0;
+    for (int chunk = 0; chunk < chars; ++chunk) {
+        int encoded = state64_digit(*(*cursor)++);
+        if (encoded < 0) return 0;
+        for (int bit = 0; bit < 6; ++bit) {
+            int pid = chunk * 6 + bit;
+            if (pid < MONO_PARAMS && (encoded & (1 << bit)))
+                mask[pid / 64] |= UINT64_C(1) << (pid % 64);
+        }
+    }
+    return 1;
+}
+
+static int read_v5_lock_values(const char **cursor, const char *end,
+                               const uint64_t *mask, uint8_t *values) {
+    int locked = 0;
+    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+        if (mask_has_param(mask, pid)) ++locked;
+    int chars = (locked * 7 + 5) / 6;
+    if (end - *cursor < chars) return 0;
+    uint32_t bits = 0;
+    int bit_count = 0, consumed = 0;
+    for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+        if (!mask_has_param(mask, pid)) continue;
+        while (bit_count < 7) {
+            if (consumed >= chars) return 0;
+            int encoded = state64_digit((*cursor)[consumed++]);
+            if (encoded < 0) return 0;
+            bits |= (uint32_t)encoded << bit_count;
+            bit_count += 6;
+        }
+        values[pid] = (uint8_t)(bits & 127u);
+        bits >>= 7;
+        bit_count -= 7;
+    }
+    *cursor += chars;
+    return consumed == chars;
+}
+
+static int append_v5_mask(char *buf, int buf_len, int *used,
+                          const mono_step_t *step) {
+    for (int first = 0; first < MONO_PARAMS; first += 6) {
+        int encoded = 0;
+        for (int bit = 0; bit < 6 && first + bit < MONO_PARAMS; ++bit)
+            if (step_has_lock(step, first + bit)) encoded |= 1 << bit;
+        if (!appendf(buf, buf_len, used, "%c", state64[encoded])) return 0;
+    }
+    return 1;
+}
+
+static int append_v5_lock_values(char *buf, int buf_len, int *used,
+                                 const mono_step_t *step) {
+    uint32_t bits = 0;
+    int bit_count = 0;
+    for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+        if (!step_has_lock(step, pid)) continue;
+        bits |= (uint32_t)step->lock_values[pid] << bit_count;
+        bit_count += 7;
+        while (bit_count >= 6) {
+            if (!appendf(buf, buf_len, used, "%c", state64[bits & 63u])) return 0;
+            bits >>= 6;
+            bit_count -= 6;
+        }
+    }
+    if (bit_count > 0)
+        if (!appendf(buf, buf_len, used, "%c", state64[bits & 63u])) return 0;
+    return 1;
+}
+
 /* Validate first, then call again with apply=1. The compact payload keeps a
  * fully populated six-track, 64-step pattern below the chain host's 16 KiB
  * state ceiling in the normal (sparse-lock) case. */
 static int compact_state_pass(mono_t *m, const char *data, const char *end,
-                              int saved_params, int mask_digits,
+                              int version, int saved_params,
                               int legacy_destinations, int apply) {
     const char *p = data;
     unsigned seen_tracks = 0;
@@ -1192,6 +1410,11 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 seen_tracks |= 1u << tr;
                 if (apply) {
                     mono_track_t *t = &m->track[tr];
+                    /* Older state records do not contain the secondary banks.
+                     * Reset those controls before applying the saved prefix so
+                     * recalling an old patch cannot inherit values from the
+                     * patch that happened to be loaded before it. */
+                    if (saved_params < MONO_PARAMS) common_defaults(t);
                     machine_defaults(t, (mono_machine_t)machine64);
                     memcpy(t->base, params, (size_t)saved_params);
                     memcpy(t->effective, t->base, MONO_PARAMS);
@@ -1201,14 +1424,32 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
             continue;
         }
         if (record == 'S') {
-            uint64_t step64, note64, velocity64, gate64, trig64, mask;
+            uint64_t step64, note64, velocity64, gate64, trig64;
+            uint64_t mask[MONO_LOCK_WORDS] = {0};
+            uint8_t lock_values[MONO_PARAMS] = {0};
             if (!read_hex(&p, end, 2, &step64) || step64 >= MONO_STEPS ||
                 !read_hex(&p, end, 2, &note64) ||
                 (note64 != 255 && note64 > 127) ||
                 !read_hex(&p, end, 2, &velocity64) || velocity64 > 127 ||
                 !read_hex(&p, end, 2, &gate64) || gate64 > 127 ||
-                !read_hex(&p, end, 2, &trig64) || trig64 > 15 ||
-                !read_hex(&p, end, mask_digits, &mask)) return 0;
+                !read_hex(&p, end, 2, &trig64) || trig64 > 15) return 0;
+            if (version >= 5) {
+                if (!read_v5_mask(&p, end, mask) ||
+                    !read_v5_lock_values(&p, end, mask, lock_values)) return 0;
+            } else {
+                uint64_t legacy_mask;
+                int mask_digits = version >= 3 ? 16 : 14;
+                if (!read_hex(&p, end, mask_digits, &legacy_mask)) return 0;
+                mask[0] = legacy_mask;
+                for (int i = 0; i < saved_params; ++i) {
+                    if (!mask_has_param(mask, i)) continue;
+                    uint64_t lock_value;
+                    if (!read_hex(&p, end, 2, &lock_value) || lock_value > 127) return 0;
+                    if (legacy_destinations && is_lfo_destination_param(i))
+                        lock_value = (uint64_t)migrate_legacy_lfo_destination((int)lock_value);
+                    lock_values[i] = (uint8_t)lock_value;
+                }
+            }
             mono_step_t *step = tr < m->track_count
                 ? &m->track[tr].steps[(int)step64] : NULL;
             if (apply && step) {
@@ -1216,15 +1457,8 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 step->velocity = (uint8_t)velocity64;
                 step->gate = (uint8_t)gate64;
                 step->trig_mask = (uint8_t)trig64;
-                step->lock_mask = mask;
-            }
-            for (int i = 0; i < saved_params; ++i) {
-                if (!(mask & (UINT64_C(1) << i))) continue;
-                uint64_t lock_value;
-                if (!read_hex(&p, end, 2, &lock_value) || lock_value > 127) return 0;
-                if (legacy_destinations && is_lfo_destination_param(i))
-                    lock_value = (uint64_t)migrate_legacy_lfo_destination((int)lock_value);
-                if (apply && step) step->lock_values[i] = (uint8_t)lock_value;
+                memcpy(step->lock_mask, mask, sizeof(mask));
+                memcpy(step->lock_values, lock_values, sizeof(lock_values));
             }
             continue;
         }
@@ -1248,13 +1482,13 @@ static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
     int version = json_int(json, "\"v\":", 0);
-    if (version != 2 && version != 3 && version != 4) return;
-    int saved_params = version >= 3 ? MONO_PARAMS : MONO_PRIMARY_PARAMS;
-    int mask_digits = version >= 3 ? 16 : 14;
+    if (version < 2 || version > 5) return;
+    int saved_params = version >= 5 ? MONO_PARAMS
+        : (version >= 3 ? 64 : MONO_PRIMARY_PARAMS);
     int legacy_destinations = version < 4;
     const char *data = tag + strlen("\"data\":\"");
     const char *end = strchr(data, '"');
-    if (!end || !compact_state_pass(m, data, end, saved_params, mask_digits,
+    if (!end || !compact_state_pass(m, data, end, version, saved_params,
                                     legacy_destinations, 0)) return;
 
     for (int tr = 0; tr < m->track_count; ++tr) {
@@ -1262,7 +1496,7 @@ static void restore_state(mono_t *m, const char *json) {
             clear_step(&m->track[tr].steps[step]);
         reset_track_runtime(m, &m->track[tr], tr);
     }
-    if (!compact_state_pass(m, data, end, saved_params, mask_digits,
+    if (!compact_state_pass(m, data, end, version, saved_params,
                             legacy_destinations, 1)) return;
 
     m->selected_track = iclamp(json_int(json, "\"track\":", 0),
@@ -1302,9 +1536,9 @@ static void set_lock(mono_t *m, const char *val, int clear) {
     if (tr < 0 || tr >= m->track_count || step < 0 || step >= MONO_STEPS ||
         pid < 0 || pid >= MONO_PARAMS) return;
     mono_step_t *s = &m->track[tr].steps[step];
-    if (clear) s->lock_mask &= ~(UINT64_C(1) << pid);
+    if (clear) step_clear_lock(s, pid);
     else {
-        s->lock_mask |= UINT64_C(1) << pid;
+        step_set_lock(s, pid);
         int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
         s->lock_values[pid] = (uint8_t)iclamp(value, 0, max);
     }
@@ -1378,7 +1612,7 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         t->effective[pid] = t->base[pid];
         if (m->record_locks && m->transport && m->seq_step >= 0) {
             mono_step_t *step = &t->steps[m->seq_step];
-            step->lock_mask |= UINT64_C(1) << pid;
+            step_set_lock(step, pid);
             step->lock_values[pid] = t->base[pid];
         }
         changed(m);
@@ -1450,7 +1684,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int first = m->step_page * 16;
         for (int i = 0; i < 16; ++i) {
             mono_step_t *s = &t->steps[first + i];
-            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
             int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= buf_len - n) break;
             n += wrote;
@@ -1461,7 +1695,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int n = 0;
         for (int i = 0; i < MONO_STEPS; ++i) {
             mono_step_t *s = &t->steps[i];
-            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
             int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= buf_len - n) break;
             n += wrote;
@@ -1495,7 +1729,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int first = m->step_page * 16;
         for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
             mono_step_t *s = &t->steps[first + i];
-            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
             int wrote = snprintf(step_csv + sn, sizeof(step_csv) - (size_t)sn,
                                  "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= (int)sizeof(step_csv) - sn) break;
@@ -1504,15 +1738,16 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int an = 0;
         for (int i = 0; i < MONO_STEPS && an < (int)sizeof(all_step_csv); ++i) {
             mono_step_t *s = &t->steps[i];
-            int state = s->lock_mask ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
             int wrote = snprintf(all_step_csv + an, sizeof(all_step_csv) - (size_t)an,
                                  "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= (int)sizeof(all_step_csv) - an) break;
             an += wrote;
         }
         int n = 0;
+        int shift_base = MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":4,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":5,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_start\":%d,\"pattern_len\":%d,\"play_order\":%d,"
                      "\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
@@ -1530,10 +1765,10 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
                      t->base[m->selected_page * 8 + 4], t->base[m->selected_page * 8 + 5],
                      t->base[m->selected_page * 8 + 6], t->base[m->selected_page * 8 + 7],
-                     t->base[MONO_ALT_BASE], t->base[MONO_ALT_BASE + 1],
-                     t->base[MONO_ALT_BASE + 2], t->base[MONO_ALT_BASE + 3],
-                     t->base[MONO_ALT_BASE + 4], t->base[MONO_ALT_BASE + 5],
-                     t->base[MONO_ALT_BASE + 6], t->base[MONO_ALT_BASE + 7],
+                     t->base[shift_base], t->base[shift_base + 1],
+                     t->base[shift_base + 2], t->base[shift_base + 3],
+                     t->base[shift_base + 4], t->base[shift_base + 5],
+                     t->base[shift_base + 6], t->base[shift_base + 7],
                      m->record_locks,
                      m->note_events, m->render_peak, m->lifetime_peak,
                      step_csv, all_step_csv)) return -1;
@@ -1544,16 +1779,13 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                 if (!appendf(buf, buf_len, &n, "%02X", saved->base[pid])) return -1;
             for (int si = 0; si < MONO_STEPS; ++si) {
                 const mono_step_t *step = &saved->steps[si];
-                if (step->note < 0 && !step->trig_mask && !step->lock_mask) continue;
+                if (step->note < 0 && !step->trig_mask && !step_has_any_lock(step)) continue;
                 if (!appendf(buf, buf_len, &n,
-                             "S%X%02X%02X%02X%02X%02X%016llX",
+                             "S%X%02X%02X%02X%02X%02X",
                              tr, si, (unsigned)(uint8_t)step->note,
-                             step->velocity, step->gate, step->trig_mask,
-                             (unsigned long long)step->lock_mask)) return -1;
-                for (int pid = 0; pid < MONO_PARAMS; ++pid)
-                    if (step->lock_mask & (UINT64_C(1) << pid))
-                        if (!appendf(buf, buf_len, &n, "%02X",
-                                     step->lock_values[pid])) return -1;
+                             step->velocity, step->gate, step->trig_mask)) return -1;
+                if (!append_v5_mask(buf, buf_len, &n, step) ||
+                    !append_v5_lock_values(buf, buf_len, &n, step)) return -1;
             }
         }
         if (!appendf(buf, buf_len, &n, "\"}")) return -1;

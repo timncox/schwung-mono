@@ -28,7 +28,7 @@
         "turn the jog to",
         "change machine.",
         "",
-        "On SYNTH, hold",
+        "On any page, hold",
         "Shift and turn",
         "knobs for eight",
         "more controls."
@@ -43,7 +43,7 @@
         "EFFECT shape the",
         "track. LFO 1-3",
         "can target Pitch or",
-        "all 64 sound params,",
+        "all 112 sound params,",
         "including each",
         "other's settings.",
         "DEST shows the name.",

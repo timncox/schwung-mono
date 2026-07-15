@@ -141,6 +141,21 @@ static void test_parameter_aliases(void) {
     mono_set_param(m, "p1", "30");
     assert(get_int(m, "lfo1_1") == 30);
     mono_set_param(m, "syn9", "73");
+    assert(get_int(m, "alt1") != 73); /* ALT follows the selected Shift page. */
+    mono_set_param(m, "alt1", "41");
+    assert(get_int(m, "alt1") == 41);
+    assert(get_int(m, "lfo1_9") == 41);
+    assert(get_int(m, "syn9") == 73);
+    mono_set_param(m, "page", "1");
+    mono_set_param(m, "amp10", "87");
+    assert(get_int(m, "alt2") == 87);
+    mono_set_param(m, "page", "2");
+    mono_set_param(m, "alt8", "52");
+    assert(get_int(m, "flt16") == 52);
+    mono_set_param(m, "page", "3");
+    mono_set_param(m, "fx15", "61");
+    assert(get_int(m, "alt7") == 61);
+    mono_set_param(m, "page", "0");
     assert(get_int(m, "alt1") == 73);
     mono_set_param(m, "alt8", "19");
     assert(get_int(m, "syn16") == 19);
@@ -244,6 +259,54 @@ static void test_shift_layer_controls_are_audible(void) {
         mono_note_on(baseline, 0, 48, 112);
         mono_note_on(changed, 0, 48, 112);
         assert(render_hash_long(baseline) != render_hash_long(changed));
+        mono_destroy(baseline);
+        mono_destroy(changed);
+    }
+}
+
+static void test_every_secondary_page_is_audible(void) {
+    for (int page = 1; page < MONO_PAGES; ++page) {
+        mono_t *baseline = mono_create(&host, 1);
+        mono_t *changed = mono_create(&host, 1);
+        assert(baseline && changed);
+        char value[16], key[16];
+        snprintf(value, sizeof(value), "%d", page);
+        mono_set_param(baseline, "page", value);
+        mono_set_param(changed, "page", value);
+
+        if (page == 1) {
+            mono_set_param(baseline, "amp1", "64");
+            mono_set_param(changed, "amp1", "64");
+        } else if (page == 2) {
+            mono_set_param(baseline, "flt1", "40");
+            mono_set_param(baseline, "flt2", "80");
+            mono_set_param(changed, "flt1", "40");
+            mono_set_param(changed, "flt2", "80");
+        } else if (page == 3) {
+            mono_set_param(baseline, "fx4", "100");
+            mono_set_param(changed, "fx4", "100");
+        } else {
+            int lfo = page - 3;
+            snprintf(key, sizeof(key), "lfo%d_1", lfo);
+            mono_set_param(baseline, key, "18");
+            mono_set_param(changed, key, "18");
+            snprintf(key, sizeof(key), "lfo%d_7", lfo);
+            mono_set_param(baseline, key, "110");
+            mono_set_param(changed, key, "110");
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            snprintf(key, sizeof(key), "alt%d", i + 1);
+            int current = get_int(changed, key);
+            snprintf(value, sizeof(value), "%d", current > 63 ? 0 : 127);
+            mono_set_param(changed, key, value);
+        }
+        mono_note_on(baseline, 0, 48, 112);
+        mono_note_on(changed, 0, 48, 112);
+        uint64_t plain = render_hash_long(baseline);
+        uint64_t shifted = render_hash_long(changed);
+        if (plain == shifted) fprintf(stderr, "inaudible secondary page: %d\n", page);
+        assert(plain != shifted);
         mono_destroy(baseline);
         mono_destroy(changed);
     }
@@ -494,14 +557,14 @@ static void test_full_state_round_trip(void) {
     mono_set_param(source, "alt8", "29");
     mono_set_param(source, "set_step", "63:72:127:64:9");
     mono_set_param(source, "lock", "4:63:55:33");
-    mono_set_param(source, "lock", "4:63:63:91");
+    mono_set_param(source, "lock", "4:63:111:91");
     mono_set_param(source, "step_page", "3");
     mono_set_param(source, "transport", "1");
 
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":4"));
+    assert(strstr(state, "\"v\":5"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -550,7 +613,7 @@ static void test_v3_lfo_destinations_migrate(void) {
     assert(source && restored);
     char state[4096];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":4");
+    char *version = strstr(state, "\"v\":5");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '3';
@@ -559,6 +622,7 @@ static void test_v3_lfo_destinations_migrate(void) {
     memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
     memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
     memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
+    strcpy(data + 4 + 64 * 2, "\"}");
 
     mono_set_param(restored, "state", state);
     assert(get_int(restored, "lfo1_1") == 1);
@@ -592,11 +656,17 @@ static void test_v2_presets_receive_machine_shift_defaults(void) {
 
     mono_set_param(restored, "machine", "5");
     mono_set_param(restored, "alt1", "99");
+    mono_set_param(restored, "page", "1");
+    mono_set_param(restored, "alt1", "3");
+    mono_set_param(restored, "page", "0");
     mono_set_param(restored, "state", state);
     assert(get_int(restored, "machine") == 0);
     assert(get_int(restored, "alt1") == 0);
     assert(get_int(restored, "alt2") == 21);
     assert(get_int(restored, "alt3") == 64);
+    mono_set_param(restored, "page", "1");
+    assert(get_int(restored, "alt1") == 64);
+    assert(get_int(restored, "alt4") == 127);
     mono_destroy(source);
     mono_destroy(restored);
 }
@@ -660,6 +730,7 @@ int main(void) {
     test_all_lfo_destinations_round_trip();
     test_lfo_can_modulate_lfo_settings();
     test_shift_layer_controls_are_audible();
+    test_every_secondary_page_is_audible();
     test_sequencer_and_lock();
     test_pattern_window_and_play_orders();
     test_live_parameter_recording_and_smoothing();

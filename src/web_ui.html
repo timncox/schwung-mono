@@ -146,7 +146,13 @@ const LFO_DESTS = [
   "LFO 1 DEST","LFO 1 TRIGGER","LFO 1 WAVE","LFO 1 MULT","LFO 1 SPEED","LFO 1 INTERLACE","LFO 1 DEPTH","LFO 1 PHASE",
   "LFO 2 DEST","LFO 2 TRIGGER","LFO 2 WAVE","LFO 2 MULT","LFO 2 SPEED","LFO 2 INTERLACE","LFO 2 DEPTH","LFO 2 PHASE",
   "LFO 3 DEST","LFO 3 TRIGGER","LFO 3 WAVE","LFO 3 MULT","LFO 3 SPEED","LFO 3 INTERLACE","LFO 3 DEPTH","LFO 3 PHASE",
-  "ALT 1","ALT 2","ALT 3","ALT 4","DRIFT","FOLD","BIT DEPTH","NOISE"
+  "ALT 1","ALT 2","ALT 3","ALT 4","DRIFT","FOLD","BIT DEPTH","NOISE",
+  "AMP ATTACK CURVE","AMP DECAY CURVE","AMP RELEASE CURVE","VELOCITY","KEY LEVEL","ENV AMOUNT","PAN KEY","GAIN",
+  "FILTER KEY TRACK","VELOCITY TO FILTER","FILTER ENV AMOUNT","FILTER DRIVE","HP SLOPE","LP SLOPE","FILTER MIX","FILTER SATURATION",
+  "EQ Q","EQ MIX","BIT DEPTH","DELAY PING PONG","DELAY DUCK","DELAY DRIVE","DELAY MOD RATE","DELAY MOD DEPTH",
+  "LFO 1 FADE","LFO 1 DELAY","LFO 1 SLEW","LFO 1 SYMMETRY","LFO 1 STEPS","LFO 1 POLARITY","LFO 1 VELOCITY","LFO 1 KEY TRACK",
+  "LFO 2 FADE","LFO 2 DELAY","LFO 2 SLEW","LFO 2 SYMMETRY","LFO 2 STEPS","LFO 2 POLARITY","LFO 2 VELOCITY","LFO 2 KEY TRACK",
+  "LFO 3 FADE","LFO 3 DELAY","LFO 3 SLEW","LFO 3 SYMMETRY","LFO 3 STEPS","LFO 3 POLARITY","LFO 3 VELOCITY","LFO 3 KEY TRACK"
 ];
 const LFO_MODE_VALUES = [0,32,64,96,127];
 const LFO_TRIGGER_NAMES = ["FREE","RETRIGGER","HOLD","ONE SHOT","HALF SHOT"];
@@ -172,6 +178,13 @@ const SYNTH_SHIFT = [
   ["RING","SUB","MOD MIX","CHAOS","DRIFT","FOLD","BITS","NOISE"],
   ["WAVE 2","BLEND","DETUNE","OCTAVE","DRIFT","FOLD","BITS","NOISE"],
   ["OP2 FINE","OP2 FB","OP3 FREQ","OP3 LEVEL","DRIFT","FOLD","BITS","NOISE"]];
+const COMMON_SHIFT = [null,
+  ["ATT CURVE","DEC CURVE","REL CURVE","VELOCITY","KEY LEVEL","ENV AMT","PAN KEY","GAIN"],
+  ["KEY TRACK","VEL TO FLT","ENV AMT","DRIVE","HP SLOPE","LP SLOPE","MIX","SATURATION"],
+  ["EQ Q","EQ MIX","BIT DEPTH","PING PONG","DUCK","DELAY DRIVE","MOD RATE","MOD DEPTH"],
+  ["FADE","DELAY","SLEW","SYMMETRY","STEPS","POLARITY","VELOCITY","KEY TRACK"],
+  ["FADE","DELAY","SLEW","SYMMETRY","STEPS","POLARITY","VELOCITY","KEY TRACK"],
+  ["FADE","DELAY","SLEW","SYMMETRY","STEPS","POLARITY","VELOCITY","KEY TRACK"]];
 const KEY_NOTES = [48,49,50,51,52,53,54,55,56,57,58,59,60];
 const KEYBOARD = ["a","w","s","e","d","f","t","g","y","h","u","j","k"];
 const NOTE_NAMES = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
@@ -186,11 +199,12 @@ const noteStarted = new Map();
 const releaseTimers = new Map();
 const el = id => document.getElementById(id);
 const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[key]);
-const labels = () => number("page") === 0 ? (altLayer ? SYNTH_SHIFT[number("machine")] : SYNTH[number("machine")]) : COMMON[number("page")];
-const controlKey = i => number("page") === 0 && altLayer ? `alt${i+1}` : `p${i+1}`;
-const isLfoDestination = i => number("page") >= 4 && i === 0;
-const isLfoTrigger = i => number("page") >= 4 && i === 1;
-const isLfoWave = i => number("page") >= 4 && i === 2;
+const labels = () => altLayer ? (number("page")===0 ? SYNTH_SHIFT[number("machine")] : COMMON_SHIFT[number("page")])
+  : (number("page")===0 ? SYNTH[number("machine")] : COMMON[number("page")]);
+const controlKey = i => altLayer ? `alt${i+1}` : `p${i+1}`;
+const isLfoDestination = i => !altLayer && number("page") >= 4 && i === 0;
+const isLfoTrigger = i => !altLayer && number("page") >= 4 && i === 1;
+const isLfoWave = i => !altLayer && number("page") >= 4 && i === 2;
 const isLfoMode = i => isLfoTrigger(i) || isLfoWave(i);
 const destinationIndex = value => Math.max(0,Math.min(LFO_DESTS.length-1,Math.round(Number(value))));
 const lfoModeIndex = value => Math.max(0,Math.min(4,Math.floor(Math.max(0,Math.min(127,Math.round(Number(value))))*5/128)));
@@ -213,7 +227,7 @@ function makeButtons(root, names, action) {
 }
 makeButtons(el("tracks"), ["T1","T2","T3","T4","T5","T6"], i=>{send("track",i); render();});
 makeButtons(el("machines"), MACHINES, i=>{send("machine",i); render();});
-makeButtons(el("pages"), PAGES, i=>{if(i!==0)altLayer=false;send("page",i);render();});
+makeButtons(el("pages"), PAGES, i=>{send("page",i);render();});
 el("layer").onclick=()=>{altLayer=!altLayer;render();};
 for (let i=0;i<8;i++) {
   const box=document.createElement("div"); box.className="control";
@@ -277,7 +291,7 @@ function render() {
   [...el("tracks").children].forEach((b,i)=>b.classList.toggle("active",i===track));
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
-  el("layerSection").hidden=page!==0;el("layer").textContent=altLayer?"SHIFT / SECONDARY":"MAIN";el("layer").classList.toggle("active",altLayer);
+  el("layerSection").hidden=false;el("layer").textContent=altLayer?`SHIFT / ${PAGES[page]}`:"MAIN";el("layer").classList.toggle("active",altLayer);
   const names=labels();
   for(let i=0;i<8;i++){
     const slider=el(`p${i+1}`),dest=isLfoDestination(i),mode=isLfoMode(i),key=controlKey(i),value=number(key);
