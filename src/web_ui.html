@@ -136,7 +136,7 @@
           <label class="seq-control">ORDER <select id="playOrder"><option value="0">FORWARD</option><option value="1">REVERSE</option><option value="2">PENDULUM</option><option value="3">RANDOM</option></select></label>
           <label class="seq-control">SWING <input id="swing" type="number" min="50" max="75" value="50"></label>
           <span class="spacer"></span><span id="stepRange">WINDOW 01–16 / 64</span></div>
-        <div class="seqbar"><button id="trackFollow">T1 FOLLOWS GLOBAL</button>
+        <div class="seqbar"><button id="trackMute">MUTE T1</button><button id="trackSolo" class="green">SOLO T1</button><button id="trackFollow">T1 FOLLOWS GLOBAL</button>
           <label class="seq-control">TRACK START <input id="trackStart" type="number" min="1" max="64" value="1"></label>
           <label class="seq-control">TRACK LENGTH <input id="trackLength" type="number" min="1" max="64" value="16"></label>
           <label class="seq-control">ROTATE <input id="trackRotate" type="number" min="0" max="63" value="0"></label>
@@ -350,6 +350,8 @@ el("patternLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("pa
 el("playOrder").onchange=()=>{send("play_order",el("playOrder").value);render();};
 el("swing").onchange=()=>{const percent=Math.max(50,Math.min(75,Number(el("swing").value)||50));send("swing",Math.round((percent-50)*127/25));render();};
 el("trackFollow").onclick=()=>{send("track_follow",number("track_follow",1)?0:1);render();};
+el("trackMute").onclick=()=>{send("track_mute",number("track_mute")?0:1);render();};
+el("trackSolo").onclick=()=>{send("track_solo",number("track_solo")?0:1);render();};
 el("trackStart").onchange=()=>{const start=Math.max(1,Math.min(64,Number(el("trackStart").value)||1));send("track_start",start-1);render();};
 el("trackLength").onchange=()=>{const length=Math.max(1,Math.min(64-number("track_start"),Number(el("trackLength").value)||1));send("track_len",length);render();};
 el("trackRotate").onchange=()=>{send("track_rotate",Math.max(0,Math.min(63,Number(el("trackRotate").value)||0)));render();};
@@ -381,7 +383,8 @@ function render() {
   el("trackSection").hidden=voice; el("sequencer").hidden=voice;
   const machine=Math.max(0,Math.min(5,number("machine"))), page=Math.max(0,Math.min(6,number("page")));
   const track=Math.max(0,Math.min(5,number("track")));
-  [...el("tracks").children].forEach((b,i)=>b.classList.toggle("active",i===track));
+  const trackStates=String(M.track_states||"").split(",").map(Number);
+  [...el("tracks").children].forEach((b,i)=>{b.classList.toggle("active",i===track);b.textContent=`T${i+1}${trackStates[i]&2?" S":trackStates[i]&1?" M":""}`;});
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
   el("layerSection").hidden=false;el("layer").textContent=altLayer?`SHIFT / ${PAGES[page]}`:"MAIN";el("layer").classList.toggle("active",altLayer);
@@ -411,6 +414,8 @@ function render() {
   if(document.activeElement!==el("playOrder"))el("playOrder").value=String(number("play_order"));
   if(document.activeElement!==el("swing"))el("swing").value=50+Math.round(number("swing")*25/127);
   const follows=!!number("track_follow",1),trackStart=Math.max(0,Math.min(63,number("track_start"))),trackLength=Math.max(1,Math.min(64-trackStart,number("track_len",length)));
+  el("trackMute").classList.toggle("active",!!number("track_mute"));el("trackMute").textContent=`${number("track_mute")?"UNMUTE":"MUTE"} T${track+1}`;
+  el("trackSolo").classList.toggle("active",!!number("track_solo"));el("trackSolo").textContent=`${number("track_solo")?"UNSOLO":"SOLO"} T${track+1}`;
   el("trackFollow").classList.toggle("active",follows);el("trackFollow").textContent=`T${track+1} ${follows?"FOLLOWS GLOBAL":"CUSTOM TIMING"}`;
   if(document.activeElement!==el("trackStart"))el("trackStart").value=trackStart+1;
   el("trackStart").disabled=follows;el("trackLength").disabled=follows;el("trackRotate").disabled=false;el("trackDiv").disabled=false;

@@ -74,7 +74,11 @@ typedef struct {
 typedef struct {
     mono_machine_t machine;
     uint8_t base[MONO_PARAMS];
+    uint8_t machine_params[MONO_MACHINE_COUNT][16];
+    uint8_t machine_valid[MONO_MACHINE_COUNT];
     mono_step_t steps[MONO_STEPS];
+    int mute;
+    int solo;
     int seq_override;
     int seq_start;
     int seq_len;
@@ -93,10 +97,14 @@ typedef struct {
 typedef struct {
     mono_machine_t machine;
     uint8_t base[MONO_PARAMS];
+    uint8_t machine_params[MONO_MACHINE_COUNT][16];
+    uint8_t machine_valid[MONO_MACHINE_COUNT];
     uint8_t effective[MONO_PARAMS];
     uint8_t control[MONO_PARAMS];
     float smoothed[MONO_PARAMS];
     mono_step_t steps[MONO_STEPS];
+    int mute;
+    int solo;
     int seq_override;
     int seq_start;
     int seq_len;
@@ -212,7 +220,11 @@ static void sync_smoothed(mono_track_t *t);
 static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
     out->machine = track->machine;
     memcpy(out->base, track->base, sizeof(out->base));
+    memcpy(out->machine_params, track->machine_params, sizeof(out->machine_params));
+    memcpy(out->machine_valid, track->machine_valid, sizeof(out->machine_valid));
     memcpy(out->steps, track->steps, sizeof(out->steps));
+    out->mute = track->mute;
+    out->solo = track->solo;
     out->seq_override = track->seq_override;
     out->seq_start = track->seq_start;
     out->seq_len = track->seq_len;
@@ -223,8 +235,12 @@ static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
 static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit) {
     track->machine = edit->machine;
     memcpy(track->base, edit->base, sizeof(track->base));
+    memcpy(track->machine_params, edit->machine_params, sizeof(track->machine_params));
+    memcpy(track->machine_valid, edit->machine_valid, sizeof(track->machine_valid));
     memcpy(track->effective, track->base, sizeof(track->effective));
     memcpy(track->steps, edit->steps, sizeof(track->steps));
+    track->mute = edit->mute;
+    track->solo = edit->solo;
     track->seq_override = edit->seq_override;
     track->seq_start = edit->seq_start;
     track->seq_len = edit->seq_len;
@@ -522,6 +538,27 @@ static void machine_defaults(mono_track_t *t, mono_machine_t machine) {
     sync_smoothed(t);
 }
 
+static void remember_machine(mono_track_t *t) {
+    int machine = iclamp(t->machine, 0, MONO_MACHINE_COUNT - 1);
+    memcpy(t->machine_params[machine], t->base, 8);
+    memcpy(t->machine_params[machine] + 8, t->base + MONO_ALT_BASE, 8);
+    t->machine_valid[machine] = 1;
+}
+
+static void recall_machine(mono_track_t *t, int machine) {
+    machine = iclamp(machine, 0, MONO_MACHINE_COUNT - 1);
+    if (machine == (int)t->machine) return;
+    remember_machine(t);
+    machine_defaults(t, (mono_machine_t)machine);
+    if (t->machine_valid[machine]) {
+        memcpy(t->base, t->machine_params[machine], 8);
+        memcpy(t->base + MONO_ALT_BASE, t->machine_params[machine] + 8, 8);
+        memcpy(t->effective, t->base, MONO_PARAMS);
+        sync_smoothed(t);
+    }
+    remember_machine(t);
+}
+
 static void init_track(mono_track_t *t, int index, int delay_frames) {
     memset(t, 0, sizeof(*t));
     t->machine = MONO_SWAVE_SAW;
@@ -538,6 +575,7 @@ static void init_track(mono_track_t *t, int index, int delay_frames) {
     for (int i = 0; i < MONO_STEPS; ++i) clear_step(&t->steps[i]);
     common_defaults(t);
     machine_defaults(t, MONO_SWAVE_SAW);
+    remember_machine(t);
     memcpy(t->effective, t->base, MONO_PARAMS);
     for (int i = 0; i < 3; ++i) t->lfo[i].rng = t->noise + (uint32_t)i * 7919u;
     t->delay = calloc((size_t)delay_frames * 2, sizeof(float));
@@ -1453,14 +1491,17 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
     if (!m || !out_lr || frames <= 0) return;
     int peak = 0;
     float bpm = bpm_now(m);
+    int any_solo = 0;
+    for (int t = 0; t < m->track_count; ++t) any_solo |= m->track[t].solo;
     for (int i = 0; i < frames; ++i) {
         int control_tick = m->control_phase == 0;
         internal_clock_tick(m, bpm);
         float l = 0.0f, r = 0.0f;
         for (int t = 0; t < m->track_count; ++t) {
             float tr = 0.0f;
-            l += render_track(m, &m->track[t], &tr, bpm, control_tick);
-            r += tr;
+            float tl = render_track(m, &m->track[t], &tr, bpm, control_tick);
+            int audible = any_solo ? m->track[t].solo : !m->track[t].mute;
+            if (audible) { l += tl; r += tr; }
         }
         l = tanhf(l * m->master);
         r = tanhf(r * m->master);
@@ -1558,8 +1599,7 @@ static int param_id(const mono_t *m, const char *key) {
 }
 
 static void select_machine(mono_track_t *t, int machine) {
-    machine = iclamp(machine, 0, MONO_MACHINE_COUNT - 1);
-    machine_defaults(t, (mono_machine_t)machine);
+    recall_machine(t, machine);
 }
 
 static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
@@ -1720,7 +1760,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
         int tr = (int)tr64;
         if (record == 'T') {
             uint64_t machine64, override64 = 0, start64 = 0, len64 = 16;
-            uint64_t rotation64 = 0, division64 = 1;
+            uint64_t rotation64 = 0, division64 = 1, mute64 = 0, solo64 = 0;
             uint8_t params[MONO_PARAMS];
             if (!read_hex(&p, end, 2, &machine64) ||
                 machine64 >= MONO_MACHINE_COUNT) return 0;
@@ -1732,6 +1772,9 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                  !read_hex(&p, end, 2, &rotation64) || rotation64 >= MONO_STEPS ||
                  !read_hex(&p, end, 2, &division64) || division64 < 1 || division64 > 8))
                 return 0;
+            if (version >= 8 &&
+                (!read_hex(&p, end, 2, &mute64) || mute64 > 1 ||
+                 !read_hex(&p, end, 2, &solo64) || solo64 > 1)) return 0;
             for (int i = 0; i < saved_params; ++i) {
                 uint64_t param;
                 if (!read_hex(&p, end, 2, &param) || param > 127) return 0;
@@ -1751,13 +1794,31 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                     machine_defaults(t, (mono_machine_t)machine64);
                     memcpy(t->base, params, (size_t)saved_params);
                     memcpy(t->effective, t->base, MONO_PARAMS);
+                    memset(t->machine_valid, 0, sizeof(t->machine_valid));
+                    t->mute = (int)mute64;
+                    t->solo = (int)solo64;
                     t->seq_override = (int)override64;
                     t->seq_start = (int)start64;
                     t->seq_len = (int)len64;
                     t->seq_rotation = (int)rotation64;
                     t->seq_division = (int)division64;
+                    remember_machine(t);
                     sync_smoothed(t);
                 }
+            }
+            continue;
+        }
+        if (record == 'M') {
+            uint64_t machine64, params64[16];
+            if (!read_hex(&p, end, 2, &machine64) || machine64 >= MONO_MACHINE_COUNT)
+                return 0;
+            for (int i = 0; i < 16; ++i)
+                if (!read_hex(&p, end, 2, &params64[i]) || params64[i] > 127) return 0;
+            if (apply && tr < m->track_count) {
+                mono_track_t *t = &m->track[tr];
+                for (int i = 0; i < 16; ++i)
+                    t->machine_params[machine64][i] = (uint8_t)params64[i];
+                t->machine_valid[machine64] = 1;
             }
             continue;
         }
@@ -1838,7 +1899,7 @@ static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
     int version = json_int(json, "\"v\":", 0);
-    if (version < 2 || version > 7) return;
+    if (version < 2 || version > 8) return;
     int saved_params = version >= 5 ? MONO_PARAMS
         : (version >= 3 ? 64 : MONO_PRIMARY_PARAMS);
     int legacy_destinations = version < 4;
@@ -2019,12 +2080,24 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         t->seq_division = iclamp(v, 1, 8);
         reset_sequence_cursors(m); changed(m); return;
     }
+    if (!strcmp(key, "track_mute")) { capture_undo(m); t->mute = v != 0; changed(m); return; }
+    if (!strcmp(key, "track_solo")) { capture_undo(m); t->solo = v != 0; changed(m); return; }
+    if (!strcmp(key, "track_mute_toggle")) {
+        int tr = iclamp(v, 0, m->track_count - 1);
+        capture_undo(m); m->track[tr].mute = !m->track[tr].mute; changed(m); return;
+    }
+    if (!strcmp(key, "track_solo_toggle")) {
+        int tr = iclamp(v, 0, m->track_count - 1);
+        capture_undo(m); m->track[tr].solo = !m->track[tr].solo; changed(m); return;
+    }
     if (!strcmp(key, "machine")) { capture_undo(m); select_machine(t, v); changed(m); return; }
     int pid = param_id(m, key);
     if (pid >= 0) {
         int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
         t->base[pid] = (uint8_t)iclamp(v, 0, max);
         t->effective[pid] = t->base[pid];
+        if (pid < 8 || (pid >= MONO_ALT_BASE && pid < MONO_ALT_BASE + 8))
+            remember_machine(t);
         int record_step = t->play_step >= 0 ? t->play_step : m->seq_step;
         if (m->record_locks && m->transport && record_step >= 0) {
             mono_step_t *step = &t->steps[record_step];
@@ -2140,6 +2213,16 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "can_undo")) return snprintf(buf, (size_t)buf_len, "%d", m->undo_valid);
     if (!strcmp(key, "can_paste_step")) return snprintf(buf, (size_t)buf_len, "%d", m->step_clipboard_valid);
     if (!strcmp(key, "can_paste_track")) return snprintf(buf, (size_t)buf_len, "%d", m->track_clipboard_valid);
+    if (!strcmp(key, "track_states")) {
+        int n = 0;
+        for (int i = 0; i < m->track_count; ++i) {
+            int state = (m->track[i].mute ? 1 : 0) | (m->track[i].solo ? 2 : 0);
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
     if (!strcmp(key, "play_step")) return snprintf(buf, (size_t)buf_len, "%d", m->seq_step);
     if (!strcmp(key, "bpm")) return snprintf(buf, (size_t)buf_len, "%.1f", bpm_now(m));
     if (!strcmp(key, "bpm_override")) return snprintf(buf, (size_t)buf_len, "%.1f", m->bpm_override);
@@ -2162,6 +2245,8 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         t->seq_override ? t->seq_len : m->pattern_len);
     if (!strcmp(key, "track_rotate")) return snprintf(buf, (size_t)buf_len, "%d", t->seq_rotation);
     if (!strcmp(key, "track_div")) return snprintf(buf, (size_t)buf_len, "%d", t->seq_division);
+    if (!strcmp(key, "track_mute")) return snprintf(buf, (size_t)buf_len, "%d", t->mute);
+    if (!strcmp(key, "track_solo")) return snprintf(buf, (size_t)buf_len, "%d", t->solo);
     if (!strcmp(key, "track_play_step")) return snprintf(buf, (size_t)buf_len, "%d", t->play_step);
     if (!strcmp(key, "machine")) return snprintf(buf, (size_t)buf_len, "%d", t->machine);
     int pid = param_id(m, key);
@@ -2214,6 +2299,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "state")) {
         char step_csv[96];
         char all_step_csv[192];
+        char track_state_csv[24];
         int sn = 0;
         int first = m->step_page * 16;
         for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
@@ -2233,14 +2319,23 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
             if (wrote < 0 || wrote >= (int)sizeof(all_step_csv) - an) break;
             an += wrote;
         }
+        int tn = 0;
+        for (int i = 0; i < m->track_count && tn < (int)sizeof(track_state_csv); ++i) {
+            int state = (m->track[i].mute ? 1 : 0) | (m->track[i].solo ? 2 : 0);
+            int wrote = snprintf(track_state_csv + tn, sizeof(track_state_csv) - (size_t)tn,
+                                 "%s%d", i ? "," : "", state);
+            if (wrote < 0 || wrote >= (int)sizeof(track_state_csv) - tn) break;
+            tn += wrote;
+        }
         int n = 0;
         int shift_base = MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":7,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":8,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_start\":%d,\"pattern_len\":%d,\"play_order\":%d,\"swing\":%d,"
                      "\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"track_follow\":%d,\"track_start\":%d,"
                      "\"track_len\":%d,\"track_rotate\":%d,\"track_div\":%d,"
+                     "\"track_mute\":%d,\"track_solo\":%d,"
                      "\"edit_step\":%d,\"step_note\":%d,\"step_velocity\":%d,"
                      "\"step_gate\":%d,\"step_trig\":%d,\"step_probability\":%d,"
                      "\"step_retrig\":%d,\"step_condition\":%d,\"step_slide\":%d,"
@@ -2248,7 +2343,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
                      "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
                      "\"alt5\":%d,\"alt6\":%d,\"alt7\":%d,\"alt8\":%d,"
-                     "\"record\":%d,"
+                     "\"record\":%d,\"track_states\":\"%s\","
                      "\"debug\":\"%u:%d:%d\","
                      "\"steps\":\"%s\",\"all_steps\":\"%s\",\"data\":\"",
                      m->selected_track, m->selected_page, m->step_page,
@@ -2257,7 +2352,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->machine, !t->seq_override,
                      t->seq_override ? t->seq_start : m->pattern_start,
                      t->seq_override ? t->seq_len : m->pattern_len,
-                     t->seq_rotation, t->seq_division,
+                     t->seq_rotation, t->seq_division, t->mute, t->solo,
                      m->edit_step, edited_step->note, edited_step->velocity,
                      edited_step->gate, edited_step->trig_mask,
                      edited_step->probability, edited_step->retrig,
@@ -2270,16 +2365,24 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[shift_base + 2], t->base[shift_base + 3],
                      t->base[shift_base + 4], t->base[shift_base + 5],
                      t->base[shift_base + 6], t->base[shift_base + 7],
-                     m->record_locks,
+                     m->record_locks, track_state_csv,
                      m->note_events, m->render_peak, m->lifetime_peak,
                      step_csv, all_step_csv)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];
-            if (!appendf(buf, buf_len, &n, "T%X%02X%02X%02X%02X%02X%02X",
+            if (!appendf(buf, buf_len, &n, "T%X%02X%02X%02X%02X%02X%02X%02X%02X",
                          tr, saved->machine, saved->seq_override, saved->seq_start,
-                         saved->seq_len, saved->seq_rotation, saved->seq_division)) return -1;
+                         saved->seq_len, saved->seq_rotation, saved->seq_division,
+                         saved->mute, saved->solo)) return -1;
             for (int pid = 0; pid < MONO_PARAMS; ++pid)
                 if (!appendf(buf, buf_len, &n, "%02X", saved->base[pid])) return -1;
+            for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
+                if (!saved->machine_valid[machine]) continue;
+                if (!appendf(buf, buf_len, &n, "M%X%02X", tr, machine)) return -1;
+                for (int i = 0; i < 16; ++i)
+                    if (!appendf(buf, buf_len, &n, "%02X",
+                                 saved->machine_params[machine][i])) return -1;
+            }
             for (int si = 0; si < MONO_STEPS; ++si) {
                 const mono_step_t *step = &saved->steps[si];
                 if (step->note < 0 && !step->trig_mask && !step_has_any_lock(step)) continue;

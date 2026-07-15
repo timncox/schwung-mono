@@ -702,7 +702,7 @@ static void test_full_state_round_trip(void) {
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":7"));
+    assert(strstr(state, "\"v\":8"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -751,13 +751,13 @@ static void test_v3_lfo_destinations_migrate(void) {
     assert(source && restored);
     char state[4096];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":7");
+    char *version = strstr(state, "\"v\":8");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '3';
     data += strlen("\"data\":\"");
     assert(!strncmp(data, "T000", 4));
-    memmove(data + 4, data + 14, strlen(data + 14) + 1); /* strip v6 track timing */
+    memmove(data + 4, data + 18, strlen(data + 18) + 1); /* strip v6-v8 track fields */
     memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
     memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
     memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
@@ -807,6 +807,51 @@ static void test_v2_presets_receive_machine_shift_defaults(void) {
     assert(get_int(restored, "alt1") == 64);
     assert(get_int(restored, "alt4") == 127);
     mono_destroy(source);
+    mono_destroy(restored);
+}
+
+static void test_machine_memory_and_track_mute_solo(void) {
+    mono_t *m = mono_create(&host, 2);
+    mono_t *restored = mono_create(&host, 2);
+    assert(m && restored);
+
+    mono_set_param(m, "syn1", "11");
+    mono_set_param(m, "alt1", "22");
+    mono_set_param(m, "machine", "1");
+    mono_set_param(m, "syn1", "33");
+    mono_set_param(m, "alt1", "44");
+    mono_set_param(m, "machine", "0");
+    assert(get_int(m, "syn1") == 11);
+    assert(get_int(m, "alt1") == 22);
+    mono_set_param(m, "machine", "1");
+    assert(get_int(m, "syn1") == 33);
+    assert(get_int(m, "alt1") == 44);
+
+    mono_set_param(m, "track_mute_toggle", "0");
+    mono_set_param(m, "track", "1");
+    mono_set_param(m, "track_mute", "1");
+    mono_set_param(m, "note_on", "48:110");
+    mono_set_param(m, "track", "0");
+    mono_set_param(m, "note_on", "60:110");
+    assert(render_energy(m, 4) == 0);
+    mono_set_param(m, "track_solo_toggle", "1");
+    assert(render_energy(m, 4) > 1000); /* solo overrides the mute mix */
+
+    char state[16384];
+    assert(mono_get_param(m, "state", state, sizeof(state)) > 0);
+    mono_set_param(restored, "state", state);
+    assert(get_int(restored, "machine") == 1);
+    assert(get_int(restored, "syn1") == 33);
+    assert(get_int(restored, "alt1") == 44);
+    assert(get_int(restored, "track_mute") == 1);
+    mono_set_param(restored, "machine", "0");
+    assert(get_int(restored, "syn1") == 11);
+    assert(get_int(restored, "alt1") == 22);
+    mono_set_param(restored, "track", "1");
+    assert(get_int(restored, "track_mute") == 1);
+    assert(get_int(restored, "track_solo") == 1);
+
+    mono_destroy(m);
     mono_destroy(restored);
 }
 
@@ -885,6 +930,7 @@ int main(void) {
     test_full_state_round_trip();
     test_v3_lfo_destinations_migrate();
     test_v2_presets_receive_machine_shift_defaults();
+    test_machine_memory_and_track_mute_solo();
     test_dense_pattern_fits_host_state_limit();
     test_maximum_lock_state_fits_overtake_channel();
     puts("mono host simulator: all tests passed");

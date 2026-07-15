@@ -106,6 +106,7 @@ let recordArmed = false;
 let patternStart = 0, patternLen = 16, playOrder = 0, playStep = -1;
 let swing = 0, trackFollow = true, trackStart = 0, trackLen = 16;
 let trackRotate = 0, trackDiv = 1;
+let trackStates = new Array(6).fill(0);
 let shift = false, deleteHeld = false, deleteUsed = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
@@ -373,6 +374,8 @@ function fetchAll() {
     trackLen = Math.max(1, Math.min(64 - trackStart, parseInt(gp('track_len') || '16', 10) || 16));
     trackRotate = Math.max(0, Math.min(63, parseInt(gp('track_rotate') || '0', 10) || 0));
     trackDiv = Math.max(1, Math.min(8, parseInt(gp('track_div') || '1', 10) || 1));
+    const states = (gp('track_states') || '').split(',');
+    for (let i = 0; i < 6; i++) trackStates[i] = parseInt(states[i], 10) || 0;
     machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
@@ -519,8 +522,12 @@ function toggleRecord() {
 }
 
 function paintTracks(force) {
-    for (let i = 0; i < 6; i++)
-        setLED(TRACK_PADS[i], i === track ? MACHINE_COLORS[machine] : 0x10, force);
+    for (let i = 0; i < 6; i++) {
+        const state = trackStates[i];
+        const color = state & 2 ? BrightGreen : (state & 1 ? 0x10
+            : (i === track ? MACHINE_COLORS[machine] : LightGrey));
+        setLED(TRACK_PADS[i], color, force);
+    }
 }
 
 function paintGlobals(force) {
@@ -773,7 +780,17 @@ globalThis.onMidiMessageInternal = function(data) {
             heldStep = {step: stepPage * 16 + d1 - STEP_FIRST, used: false};
             paintSteps(false); needsRedraw = true; return;
         }
-        for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) { selectTrack(i); return; }
+        for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) {
+            if (deleteHeld) {
+                deleteUsed = true;
+                host_module_set_param(shiftActive() ? 'track_solo_toggle' : 'track_mute_toggle', `${i}`);
+                fetchAll(); paintTracks(false); needsRedraw = true;
+                announce(`Track ${i + 1} ${shiftActive()
+                    ? (trackStates[i] & 2 ? 'solo' : 'solo off')
+                    : (trackStates[i] & 1 ? 'muted' : 'unmuted')}`);
+            } else selectTrack(i);
+            return;
+        }
         if (d1 === PAD_MACHINE) { cycleMachine(shiftActive() ? -1 : 1); return; }
         if (d1 === PAD_TRANSPORT) {
             shiftActive() ? openSeqSetup() : toggleTransport();
