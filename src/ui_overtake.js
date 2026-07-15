@@ -26,6 +26,25 @@ const LFO_DESTS = [
     'L3 DEST','L3 TRIG','L3 WAVE','L3 MULT','L3 SPEED','L3 INTL','L3 DEPTH','L3 PHASE',
     'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BITS','NOISE'
 ];
+/* The Move screen gives each knob a 32 px column (five glyphs). Keep a
+ * separate compact destination table so long names never overwrite the next
+ * column. Full names remain available to the screen reader and Remote UI. */
+const LFO_DEST_SCREEN = [
+    'OFF','PITCH',
+    'SYN1','SYN2','SYN3','SYN4','SYN5','SYN6','SYN7','TUNE',
+    'AATK','AHOLD','ADEC','AREL','DIST','VOL','PAN','PORT',
+    'FBASE','FWID','HPQ','LPQ','FATK','FDEC','EBASE','EWID',
+    'EQFRQ','EQGN','SRATE','DSEND','DTIME','DFB','DBASE','DWID',
+    'L1DST','L1TRG','L1WAV','L1MUL','L1SPD','L1INT','L1DEP','L1PHS',
+    'L2DST','L2TRG','L2WAV','L2MUL','L2SPD','L2INT','L2DEP','L2PHS',
+    'L3DST','L3TRG','L3WAV','L3MUL','L3SPD','L3INT','L3DEP','L3PHS',
+    'ALT1','ALT2','ALT3','ALT4','DRIFT','FOLD','BITS','NOISE'
+];
+const LFO_MODE_VALUES = [0, 32, 64, 96, 127];
+const LFO_TRIGGER_NAMES = ['Free', 'Retrigger', 'Hold', 'One Shot', 'Half Shot'];
+const LFO_TRIGGER_SCREEN = ['FREE', 'TRIG', 'HOLD', 'ONE', 'HALF'];
+const LFO_WAVE_NAMES = ['Sine', 'Saw', 'Triangle', 'Square', 'Random'];
+const LFO_WAVE_SCREEN = ['SINE', 'SAW', 'TRI', 'SQR', 'RAND'];
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -175,10 +194,25 @@ function shiftLayer() { return page === 0 && shiftActive() && !heldStep; }
 function names() { return page === 0 ? (shiftLayer() ? SYNTH_SHIFT[machine] : SYNTH[machine]) : COMMON[page]; }
 function activeValues() { return shiftLayer() ? altValues : values; }
 function isLfoDestination(i) { return page >= 4 && i === 0; }
+function isLfoTrigger(i) { return page >= 4 && i === 1; }
+function isLfoWave(i) { return page >= 4 && i === 2; }
+function isLfoMode(i) { return isLfoTrigger(i) || isLfoWave(i); }
 function destinationIndex(value) { return Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value))); }
+function lfoModeIndex(value) {
+    const raw = Math.max(0, Math.min(127, Math.round(value)));
+    return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
+}
 function displayValue(i, value) {
-    return isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
-        : `${value}`.padStart(3, '0');
+    if (isLfoDestination(i)) return LFO_DEST_SCREEN[destinationIndex(value)];
+    if (isLfoTrigger(i)) return LFO_TRIGGER_SCREEN[lfoModeIndex(value)];
+    if (isLfoWave(i)) return LFO_WAVE_SCREEN[lfoModeIndex(value)];
+    return `${value}`.padStart(3, '0');
+}
+function announcedValue(i, value) {
+    if (isLfoDestination(i)) return LFO_DESTS[destinationIndex(value)];
+    if (isLfoTrigger(i)) return LFO_TRIGGER_NAMES[lfoModeIndex(value)];
+    if (isLfoWave(i)) return LFO_WAVE_NAMES[lfoModeIndex(value)];
+    return displayValue(i, value);
 }
 
 function parseSteps() {
@@ -232,9 +266,15 @@ function cycleMachine(delta) {
 function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
     const target = activeValues();
-    let v = isLfoDestination(i)
-        ? Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + delta))
-        : Math.max(0, Math.min(127, target[i] + delta));
+    let v;
+    if (isLfoDestination(i)) {
+        v = Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + delta));
+    } else if (isLfoMode(i)) {
+        const next = Math.max(0, Math.min(4, lfoModeIndex(target[i]) + delta));
+        v = LFO_MODE_VALUES[next];
+    } else {
+        v = Math.max(0, Math.min(127, target[i] + delta));
+    }
     if (v === target[i]) return;
     target[i] = v;
     if (heldStep) {
@@ -248,7 +288,7 @@ function adjust(i, delta) {
     } else {
         host_module_set_param(shiftLayer() ? `alt${i + 1}` : `p${i + 1}`, `${v}`);
     }
-    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : displayValue(i, v));
+    announceParameter(names()[i], shiftActive() && heldStep ? 'unlocked' : announcedValue(i, v));
     needsRedraw = true;
 }
 

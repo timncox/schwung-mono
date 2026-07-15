@@ -134,6 +134,9 @@ const LFO_DESTS = [
   "LFO 3 DEST","LFO 3 TRIGGER","LFO 3 WAVE","LFO 3 MULT","LFO 3 SPEED","LFO 3 INTERLACE","LFO 3 DEPTH","LFO 3 PHASE",
   "ALT 1","ALT 2","ALT 3","ALT 4","DRIFT","FOLD","BIT DEPTH","NOISE"
 ];
+const LFO_MODE_VALUES = [0,32,64,96,127];
+const LFO_TRIGGER_NAMES = ["FREE","RETRIGGER","HOLD","ONE SHOT","HALF SHOT"];
+const LFO_WAVE_NAMES = ["SINE","SAW","TRIANGLE","SQUARE","RANDOM"];
 const COMMON = [null,
   ["ATK","HOLD","DEC","REL","DIST","VOL","PAN","PORT"],
   ["BASE","WIDTH","HP Q","LP Q","F ATK","F DEC","F BASE","F WIDTH"],
@@ -172,8 +175,16 @@ const number = (key, fallback=0) => M[key] === undefined ? fallback : Number(M[k
 const labels = () => number("page") === 0 ? (altLayer ? SYNTH_SHIFT[number("machine")] : SYNTH[number("machine")]) : COMMON[number("page")];
 const controlKey = i => number("page") === 0 && altLayer ? `alt${i+1}` : `p${i+1}`;
 const isLfoDestination = i => number("page") >= 4 && i === 0;
+const isLfoTrigger = i => number("page") >= 4 && i === 1;
+const isLfoWave = i => number("page") >= 4 && i === 2;
+const isLfoMode = i => isLfoTrigger(i) || isLfoWave(i);
 const destinationIndex = value => Math.max(0,Math.min(LFO_DESTS.length-1,Math.round(Number(value))));
-const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)] : String(value).padStart(3,"0");
+const lfoModeIndex = value => Math.max(0,Math.min(4,Math.floor(Math.max(0,Math.min(127,Math.round(Number(value))))*5/128)));
+const displayValue = (i,value) => isLfoDestination(i) ? LFO_DESTS[destinationIndex(value)]
+  : isLfoTrigger(i) ? LFO_TRIGGER_NAMES[lfoModeIndex(value)]
+  : isLfoWave(i) ? LFO_WAVE_NAMES[lfoModeIndex(value)]
+  : String(value).padStart(3,"0");
+const rawControlValue = (i,value) => isLfoMode(i) ? LFO_MODE_VALUES[Math.max(0,Math.min(4,Math.round(Number(value))))] : Number(value);
 function send(key, value) {
   if (!PREFIX) return false;
   M[key] = String(value);
@@ -195,7 +206,7 @@ for (let i=0;i<8;i++) {
   box.innerHTML=`<label id="label${i}">P${i+1}</label><input id="p${i+1}" type="range" min="0" max="127"><output class="value" id="value${i}">000</output>`;
   el("controls").appendChild(box);
   const slider=el(`p${i+1}`);
-  slider.oninput=()=>{const key=controlKey(i);touched[key]=Date.now();el(`value${i}`).value=displayValue(i,slider.value);send(key,slider.value);};
+  slider.oninput=()=>{const key=controlKey(i),raw=rawControlValue(i,slider.value);touched[key]=Date.now();el(`value${i}`).value=displayValue(i,raw);send(key,raw);};
 }
 for (let i=0;i<16;i++) {
   const b=document.createElement("button"); b.className="step"; b.textContent=String(i+1).padStart(2,"0");
@@ -251,7 +262,15 @@ function render() {
   [...el("machines").children].forEach((b,i)=>b.classList.toggle("active",i===machine));
   [...el("pages").children].forEach((b,i)=>b.classList.toggle("active",i===page));
   el("layerSection").hidden=page!==0;el("layer").textContent=altLayer?"SHIFT / SECONDARY":"MAIN";el("layer").classList.toggle("active",altLayer);
-  const names=labels(); for(let i=0;i<8;i++){const slider=el(`p${i+1}`),dest=isLfoDestination(i),key=controlKey(i),value=number(key);slider.max=dest?LFO_DESTS.length-1:127;slider.step=1;el(`label${i}`).textContent=names[i];syncRange(`p${i+1}`,value,`value${i}`,key);el(`value${i}`).value=displayValue(i,value);}
+  const names=labels();
+  for(let i=0;i<8;i++){
+    const slider=el(`p${i+1}`),dest=isLfoDestination(i),mode=isLfoMode(i),key=controlKey(i),value=number(key);
+    slider.max=dest?LFO_DESTS.length-1:mode?4:127;
+    slider.step=1;
+    el(`label${i}`).textContent=names[i];
+    syncRange(`p${i+1}`,mode?lfoModeIndex(value):value,null,key);
+    el(`value${i}`).value=displayValue(i,value);
+  }
   syncRange("master",number("master",100),"masterValue");
   const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});

@@ -71,7 +71,9 @@
         "LFO DEST names all",
         "64 sound params plus",
         "Pitch. LFOs can",
-        "modulate each other."
+        "modulate each other.",
+        "TRIG and WAVE use",
+        "five named choices."
       ]
     },
     {

@@ -37,6 +37,10 @@ Each LFO has 66 named destinations: Off, Pitch, and every one of the 64 sound
 parameters. That includes the synthesis and Shift layers, envelopes, filters,
 effects, and every setting on all three LFOs. LFO-to-LFO and self-modulation
 use a bounded one-sample feedback path so recursive routings stay stable.
+On Move, destination readouts use compact five-character names that stay in
+their knob column. Trigger and Wave are five-position controls with named
+readouts: Free/Retrigger/Hold/One Shot/Half Shot and
+Sine/Saw/Triangle/Square/Random.
 
 ## Saving and recall
 

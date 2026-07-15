@@ -55,6 +55,12 @@ clamped, allowing cross- and self-modulation without recursive evaluation.
 State v4 stores this direct map; v2/v3 seven-destination presets migrate on
 load.
 
+The engine keeps Trigger and Wave in their original 0-127 state slots, split
+into five equal bands. Custom Move and browser UIs present those bands as
+named, detented choices and write canonical values 0/32/64/96/127. Compact
+five-character destination labels prevent values from spilling into adjacent
+Move screen columns without changing the saved-state format.
+
 The sound-generator manifest exposes stable `synN`, `ampN`, `fltN`, `fxN`,
 and `lfoX_N` keys. Secondary synthesis controls use stable `syn9`...`syn16`
 and `alt1`...`alt8` aliases. The overtake UI exposes the selected page through

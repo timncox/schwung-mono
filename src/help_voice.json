@@ -46,7 +46,9 @@
         "all 64 sound params,",
         "including each",
         "other's settings.",
-        "DEST shows the name."
+        "DEST shows the name.",
+        "TRIG and WAVE use",
+        "five named choices."
       ]
     },
     {

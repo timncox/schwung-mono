@@ -932,7 +932,7 @@
           </div>
         </div>
       </div>
-      <div class="warning"><b>Shift synthesis</b><span>On the SYNTH page, hold Shift and turn any parameter knob for eight additional machine controls. The first four change with the machine; knobs 5–8 are Drift, Fold, Bits, and Noise. Each LFO can target Pitch or any of the 64 sound parameters—including settings on the other LFOs—and shows the destination by name.</span></div>
+      <div class="warning"><b>Shift synthesis</b><span>On the SYNTH page, hold Shift and turn any parameter knob for eight additional machine controls. The first four change with the machine; knobs 5–8 are Drift, Fold, Bits, and Noise. Each LFO can target Pitch or any of the 64 sound parameters—including settings on the other LFOs—and shows the destination by name. Trigger and Wave step through five named choices instead of raw numbers.</span></div>
     </div>
   </section>
 
@@ -1090,6 +1090,9 @@
     'LFO 3 DEST','LFO 3 TRIGGER','LFO 3 WAVE','LFO 3 MULT','LFO 3 SPEED','LFO 3 INTERLACE','LFO 3 DEPTH','LFO 3 PHASE',
     'ALT 1','ALT 2','ALT 3','ALT 4','DRIFT','FOLD','BIT DEPTH','NOISE'
   ];
+  const LFO_MODE_VALUES = [0,32,64,96,127];
+  const LFO_TRIGGER_NAMES = ['FREE','RETRIGGER','HOLD','ONE SHOT','HALF SHOT'];
+  const LFO_WAVE_NAMES = ['SINE','SAW','TRIANGLE','SQUARE','RANDOM'];
   const values = Array.from({ length: 7 }, (_, p) => Array.from({ length: 8 }, (_, i) =>
     p === 0 ? [76,18,32,0,0,0,0,64][i] : (p >= 4 && i === 0 ? 0 : 64)));
   const shiftValues = [
@@ -1202,8 +1205,18 @@
   function activeParams() { return currentPage === 0 ? (editorShiftActive() ? SHIFT_PARAMS[currentMachine] : MACHINES[currentMachine].params) : PAGES[currentPage].params; }
   function activeEditorValues() { return editorShiftActive() ? shiftValues[currentMachine] : values[currentPage]; }
   function isEditorLfoDestination(i) { return currentPage >= 4 && i === 0; }
+  function isEditorLfoTrigger(i) { return currentPage >= 4 && i === 1; }
+  function isEditorLfoWave(i) { return currentPage >= 4 && i === 2; }
+  function isEditorLfoMode(i) { return isEditorLfoTrigger(i) || isEditorLfoWave(i); }
+  function editorLfoModeIndex(value) {
+    const raw = Math.max(0, Math.min(127, Math.round(value)));
+    return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
+  }
   function editorValue(i, value) {
-    return isEditorLfoDestination(i) ? LFO_DESTS[Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value)))] : String(value).padStart(3,'0');
+    if (isEditorLfoDestination(i)) return LFO_DESTS[Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value)))];
+    if (isEditorLfoTrigger(i)) return LFO_TRIGGER_NAMES[editorLfoModeIndex(value)];
+    if (isEditorLfoWave(i)) return LFO_WAVE_NAMES[editorLfoModeIndex(value)];
+    return String(value).padStart(3,'0');
   }
   function renderEditor() {
     document.querySelectorAll('.page-button').forEach((b, i) => b.classList.toggle('active', i === currentPage));
@@ -1236,14 +1249,16 @@
       const input = document.createElement('input');
       input.type = 'range';
       input.min = '0';
-      input.max = isEditorLfoDestination(i) ? String(LFO_DESTS.length - 1) : '127';
+      const mode = isEditorLfoMode(i);
+      input.max = isEditorLfoDestination(i) ? String(LFO_DESTS.length - 1) : mode ? '4' : '127';
       input.step = '1';
-      input.value = String(value);
+      input.value = String(mode ? editorLfoModeIndex(value) : value);
       input.id = `param-${i}`;
       input.disabled = name === '–';
       input.addEventListener('input', () => {
-        editorValues[i] = Number(input.value);
-        readout.querySelector(`[data-value="${i}"]`).textContent = editorValue(i, Number(input.value));
+        const raw = mode ? LFO_MODE_VALUES[Number(input.value)] : Number(input.value);
+        editorValues[i] = raw;
+        readout.querySelector(`[data-value="${i}"]`).textContent = editorValue(i, raw);
       });
       wrap.append(label, input);
       controls.appendChild(wrap);
