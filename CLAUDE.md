@@ -60,9 +60,10 @@ milestones.
 Each LFO destination is a direct 0-113 enum: Off, Pitch, then parameter IDs
 0-111. Modulation of LFO parameters is fed into the following sample and
 clamped, allowing cross- and self-modulation without recursive evaluation.
-State v5 stores this direct map and packs 112-bit lock masks and 7-bit lock
-values compactly. State v2-v4 patches migrate on load; v2/v3 seven-destination
-LFO routings are translated to the direct map.
+State v8 stores this direct map, per-track timing and performance state,
+machine-specific sound memories, and advanced step behavior while packing
+112-bit lock masks and 7-bit lock values compactly. State v2-v7 patches migrate
+on load; v2/v3 seven-destination LFO routings are translated to the direct map.
 
 The engine keeps Trigger and Wave in their original 0-127 state slots, split
 into five equal bands. Custom Move and browser UIs present those bands as
@@ -79,11 +80,12 @@ aliases.
 ## Sequencer
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
-independent note/amp/filter/LFO trigger bits, and locks for any of the 112 sound
-parameters. On each trig, effective parameters reset to the track's base values
-and then apply that step's locks. MIDI clock advances at six ticks per 16th;
-the engine falls back to `host->get_bpm()` when its own transport is running
-without clock.
+independent note/amp/filter/LFO trigger bits, probability, 1–8 retrigs, cycle
+condition, slide, and locks for any of the 112 sound parameters. On each trig,
+effective parameters reset to the track's base values and then apply that
+step's locks. MIDI clock advances at six ticks per 16th; swing offsets
+alternating steps, and the engine falls back to `host->get_bpm()` when its own
+transport is running without clock.
 
 The `record` performance parameter arms live lock capture: while transport is
 running, page and Shift-layer edits write the selected track's current step as
@@ -101,6 +103,12 @@ changes restart traversal on the following sequencer tick; Pendulum does not
 repeat its end points. The Move UI edits these settings in a separate Sequence
 Setup view, while `all_steps` gives Remote UI one 64-value overview without
 changing `step_page` or causing editor remounts.
+
+Tracks can override the global start and length, rotate the resulting window,
+and divide their clock by 1–8. They also carry saved mute/solo state and a
+16-parameter memory for each synthesis machine. Step and track clipboards plus
+a snapshot swap provide copy/paste and one-level undo/redo without allocating
+in the audio render path.
 
 ## Fidelity boundary
 

@@ -38,7 +38,12 @@
         "White = playing.",
         "",
         "Arrows change the",
-        "16-step page."
+        "16-step page.",
+        "",
+        "Copy + held step:",
+        "copy. Shift + Copy:",
+        "paste. Undo toggles",
+        "undo and redo."
       ]
     },
     {
@@ -50,11 +55,30 @@
         "Knob 1: start.",
         "Knob 2: length.",
         "Knob 3: order.",
-        "Knob 4: step page.",
+        "Knob 4: swing.",
+        "Knobs 5-8: track",
+        "start, length,",
+        "rotation, division.",
+        "Shift + turn 5-8",
+        "returns to global.",
         "",
         "Orders are Forward,",
         "Reverse, Pendulum",
         "and Random."
+      ]
+    },
+    {
+      "title": "Mute and Solo",
+      "lines": [
+        "Delete + top pad",
+        "1-6 toggles mute.",
+        "",
+        "Shift + Delete +",
+        "top pad 1-6",
+        "toggles solo.",
+        "",
+        "Green = solo.",
+        "Dim = muted."
       ]
     },
     {
@@ -108,8 +132,10 @@
         "",
         "Save current keeps",
         "all 6 sounds, 64",
-        "steps, play window,",
-        "order and locks.",
+        "steps, per-machine",
+        "sounds, timing,",
+        "step behavior,",
+        "mutes and locks.",
         "",
         "Back closes preset",
         "and setup screens."

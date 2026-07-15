@@ -8,7 +8,8 @@ It ships in two forms:
 - **Mono Voice** (`mono-voice`) — one machine voice inside a normal Move
   track, using Move's pads and sequencer.
 - **Mono** (`mono`) — a full-surface six-track instrument with an internal
-  64-step sequencer and per-step parameter locks.
+  64-step sequencer, per-step parameter locks, independent track timing,
+  probability, retrigs, conditions, and slide.
 
 ## Operation manual
 
@@ -28,6 +29,10 @@ and machine reference.
 Every track also has an AHDR envelope, dual-cutoff resonant filter,
 distortion, EQ, sample-rate reduction, stereo filtered delay, portamento,
 pan, and three assignable LFOs.
+
+Each track remembers a separate 16-control synthesis panel for every machine.
+Switching from Saw to Pulse and back restores the Saw settings you left behind;
+those per-machine sounds are included in Mono state and presets.
 
 Hold Shift while turning knobs 1–8 on any sound page to open its secondary
 bank. SYNTH adds machine-specific controls plus Drift, Fold, Bits, and Noise;
@@ -68,10 +73,11 @@ and wave remain stepped so automation never passes through an unintended mode.
   Shift + Step 1; Move saves Sets automatically.
 - **Mono six-track pattern:** inside the full-surface build, hold Shift and
   click the jog wheel. **Save current** captures all six sounds, all 64 steps,
-  and every parameter lock; choosing a saved name recalls it without starting
-  transport automatically. Back closes the naming screen or preset browser
-  without leaving Mono; at the main instrument screen it resumes its normal
-  Schwung suspend behavior.
+  every machine variation, track timing, mute/solo state, advanced step
+  settings, and every parameter lock; choosing a saved name recalls it without
+  starting transport automatically. Back closes the naming screen or preset
+  browser without leaving Mono; at the main instrument screen it resumes its
+  normal Schwung suspend behavior.
 
 ## Build and test
 
@@ -98,6 +104,8 @@ scripts/deploy.sh
 - Top-row pad 7: cycle machine; Shift reverses direction
 - Top-row pad 8: start/stop internal sequencer
 - Shift + top-row pad 8: open Sequence Setup
+- Delete + top-row pads 1-6: mute/unmute a track
+- Shift + Delete + top-row pads 1-6: solo/unsolo a track
 - Lower three pad rows: chromatic performance keyboard
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
@@ -105,13 +113,18 @@ scripts/deploy.sh
 - Shift + knobs 1-8: edit the current page's secondary bank
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
+- Hold step + Copy: copy a step; hold step + Shift + Copy: paste it
+- Copy / Shift + Copy without a held step: copy / paste the selected track
+- Undo: undo or redo the most recent sound, pattern, or timing edit
 - Move Record: arm/disarm live knob-lock recording during playback
 
-Sequence Setup keeps the pattern controls off the sound-editing screen. Knob 1
-sets the first played step, knob 2 sets the window length, knob 3 selects
-Forward/Reverse/Pendulum/Random order, and knob 4 selects the visible 16-step
-page. The Remote UI shows all 64 steps together and dims steps outside the
-saved playback window.
+Sequence Setup keeps timing controls off the sound-editing screen. Knobs 1–4
+set global start, length, Forward/Reverse/Pendulum/Random order, and swing.
+Knobs 5–8 set the selected track's start, length, rotation, and clock division;
+Shift + turn on that bank returns it to the global window. Tap a step to set
+the focused start directly. The Remote UI shows all 64 steps together, dims
+steps outside the saved window, and exposes the same global and per-track
+timing controls.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
@@ -125,6 +138,9 @@ Schwung refreshes the module state. If the panel is waiting, select a different
 Remote UI Slot tab and return to reconnect Schwung's slot subscription.
 Remote edits use Mono's event command channel so Schwung 0.11.4 does not remount
 the custom editor for every value emitted during a slider drag.
+The Remote sequence panel also provides step/track copy and paste, undo/redo,
+mute/solo, and an Edit Step mode for note, velocity, gate, trig mask,
+probability, 1–8 retrigs, 1:2/2:2/1:4…4:4 conditions, and slide time.
 
 ## Clean-room scope
 
@@ -133,10 +149,9 @@ copied visual assets. The initial synthesis algorithms are original
 implementations guided by publicly documented behavior. Exact response-curve
 calibration against reference hardware is future work.
 
-## Version 0.1 boundary
+## Current fidelity boundary
 
-This first vertical slice proves the module architecture and is ready for a
-hardware smoke test. It does not yet include VO-6, BeatBox, DigiPRO user-wave
+Mono does not yet include VO-6, BeatBox, DigiPRO user-wave
 loading, FM+ Parallel/Dynamic, FX machines/neighbor routing, arpeggiators,
 or song mode. The current factory-independent algorithms also need A/B
 calibration against a reference Monomachine before they should be described

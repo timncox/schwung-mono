@@ -747,7 +747,7 @@
 <main id="manual">
   <div class="hero wrap" id="top">
     <div class="hero-meta">
-      <span>SFX-MV6 / operation manual 0.1</span>
+      <span>SFX-MV6 / operation manual 0.2</span>
       <span>Six-track digital machine instrument</span>
     </div>
     <h1 class="hero-title">Mono<span>//6</span></h1>
@@ -873,7 +873,7 @@
           <button type="button" data-inspect="voice">Mono Voice differences</button>
         </div>
       </div>
-      <div class="warning"><b>Sequence Setup</b><span>Hold <kbd>Shift</kbd> and press top-row pad 8. Knobs 1–4 become Start, Length, Order, and visible Page. Choose Forward, Reverse, Pendulum, or Random; tap a Step key in this view to set the start directly. Press Back or Shift + pad 8 to return.</span></div>
+      <div class="warning"><b>Sequence Setup</b><span>Hold <kbd>Shift</kbd> and press top-row pad 8. Knobs 1–4 become global Start, Length, Order, and Swing. Knobs 5–8 set the selected track's Start, Length, Rotation, and Division; Shift + turn returns that track to global timing. Tap a Step key to set the focused start directly. Press Back or Shift + pad 8 to return.</span></div>
     </div>
   </section>
 
@@ -903,7 +903,7 @@
       <div class="lock-workflow">
         <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine, every sound parameter, and Mono's live automation locks.</p></div>
         <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips, track state, and Mono Voice automation.</p></div>
-        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, playback window, order, and parameter locks return. Back cancels naming or closes the browser without leaving Mono.</p></div>
+        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall restores all six tracks, every machine variation, 64 steps, timing, step conditions, mutes, and parameter locks. Back cancels naming or closes the browser without leaving Mono.</p></div>
       </div>
     </div>
   </section>
@@ -934,7 +934,7 @@
           </div>
         </div>
       </div>
-      <div class="warning"><b>Shift banks</b><span>Hold Shift and turn any parameter knob on any page for eight additional controls. SYNTH adds machine controls; AMP adds envelope curves and response; FILTER adds tracking, slopes, drive, mix, and saturation; EFFECT adds deeper EQ and delay shaping; each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key tracking. Every LFO can target Pitch or any of the 112 sound parameters.</span></div>
+      <div class="warning"><b>Shift banks + machine memory</b><span>Hold Shift and turn any parameter knob on any page for eight additional controls. SYNTH adds machine controls; AMP adds envelope curves and response; FILTER adds tracking, slopes, drive, mix, and saturation; EFFECT adds deeper EQ and delay shaping; each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key tracking. Every LFO can target Pitch or any of the 112 sound parameters. Each track remembers a separate SYNTH + Shift SYNTH setup for every machine.</span></div>
     </div>
   </section>
 
@@ -988,14 +988,16 @@
       <div class="reference-grid">
         <div class="ref-panel">
           <h3>Mono / full surface</h3>
-          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks.</span></div>
+          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks. Delete + pad toggles mute; Shift + Delete + pad toggles solo.</span></div>
           <div class="ref-row"><b>Top pad 7</b><span>Next machine. <kbd>Shift</kbd> + pad selects the previous machine.</span></div>
           <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer. <kbd>Shift</kbd> + pad 8 opens Sequence Setup.</span></div>
           <div class="ref-row"><b>Lower 24 pads</b><span>Chromatic keyboard for the selected track, starting at MIDI note 48.</span></div>
           <div class="ref-row"><b>Remote audition keys</b><span>Play MIDI notes 48–60 on the selected Mono track. The large label is the note; the small A–K label is its optional computer-key shortcut. A click is held long enough to be audible. If the Remote UI says it is waiting, select another Slot tab and return to reconnect it.</span></div>
           <div class="ref-row"><b>Step keys</b><span>Tap to toggle trigs; hold while turning a knob to lock it.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Select steps 1–16, 17–32, 33–48, or 49–64.</span></div>
-          <div class="ref-row"><b>Sequence Setup</b><span>Knobs 1–4 set playback start, length, Forward/Reverse/Pendulum/Random order, and visible step page. Tap a Step key to choose the start.</span></div>
+          <div class="ref-row"><b>Sequence Setup</b><span>Knobs 1–4 set global start, length, Forward/Reverse/Pendulum/Random order, and swing. Knobs 5–8 set per-track start, length, rotation, and 1–8 clock division. Tap a Step key to choose the focused start.</span></div>
+          <div class="ref-row"><b>Copy and Undo</b><span>Hold a step + Copy to copy; add Shift to paste. With no held step, Copy / Shift + Copy works on the whole selected track. Undo toggles undo and redo.</span></div>
+          <div class="ref-row"><b>Remote step detail</b><span>Edit Step exposes note, velocity, gate, trig mask, probability, retrigs, cycle conditions, and slide. The Remote also exposes mute/solo and all timing controls.</span></div>
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>Edit the current page's secondary eight-control bank.</span></div>
@@ -1015,7 +1017,7 @@
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>
       </div>
-      <div class="warning"><b>Version 0.1 boundary</b><span>VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
+      <div class="warning"><b>Current fidelity boundary</b><span>VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
     </div>
   </section>
 
