@@ -9,7 +9,8 @@
 
 #define BLOCK 128
 
-static float sim_bpm(void) { return 120.0f; }
+static int bpm_calls;
+static float sim_bpm(void) { bpm_calls++; return 120.0f; }
 
 static host_api_v1_t host = {
     .api_version = MOVE_PLUGIN_API_VERSION,
@@ -90,6 +91,38 @@ static void test_note_release(void) {
     mono_note_on(m, 0, 60, 100);
     int64_t live = render_energy(m, 4);
     assert(live > 1000);
+    mono_note_off(m, 0, 60);
+    (void)render_energy(m, 16);
+    assert(render_energy(m, 2) < live / 100);
+    mono_destroy(m);
+}
+
+static void test_held_note_priority_and_block_tempo_lookup(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "amp4", "0");
+    mono_note_on(m, 0, 60, 90);
+    mono_note_on(m, 0, 67, 110);
+    mono_note_off(m, 0, 67);
+
+    char debug[256];
+    get_string(m, "debug", debug, sizeof(debug));
+    unsigned events, blocks, nonzero, nonfinite;
+    int peak, lifetime, sample_rate, note, velocity, stage, env, freq, volume;
+    assert(sscanf(debug, "%u:%d:%d:%u:%u:%u:%d:%d:%d:%d:%d:%d:%d",
+                  &events, &peak, &lifetime, &blocks, &nonzero, &nonfinite,
+                  &sample_rate, &note, &velocity, &stage, &env, &freq,
+                  &volume) == 13);
+    assert(note == 60);
+    assert(velocity == 90);
+    int64_t live = render_energy(m, 1);
+    assert(live > 1000);
+
+    bpm_calls = 0;
+    int16_t out[BLOCK * 2];
+    mono_render(m, out, BLOCK);
+    assert(bpm_calls == 1);
+
     mono_note_off(m, 0, 60);
     (void)render_energy(m, 16);
     assert(render_energy(m, 2) < live / 100);
@@ -725,6 +758,7 @@ static void test_maximum_lock_state_fits_overtake_channel(void) {
 int main(void) {
     test_all_machines_sound_distinct();
     test_note_release();
+    test_held_note_priority_and_block_tempo_lookup();
     test_filters_remain_finite_and_retrigger();
     test_parameter_aliases();
     test_all_lfo_destinations_round_trip();

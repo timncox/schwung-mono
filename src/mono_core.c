@@ -13,6 +13,7 @@
 #define MONO_WAVES 32
 #define MONO_WAVE_LEN 512
 #define MONO_DELAY_SECONDS 2
+#define MONO_CONTROL_INTERVAL 8
 
 enum {
     TRIG_NOTE = 1,
@@ -42,6 +43,13 @@ typedef struct {
 } mono_svf_t;
 
 typedef struct {
+    float a1;
+    float a2;
+    float a3;
+    float k;
+} mono_svf_coeff_t;
+
+typedef struct {
     float phase;
     float held;
     float slewed;
@@ -63,12 +71,17 @@ typedef struct {
     mono_machine_t machine;
     uint8_t base[MONO_PARAMS];
     uint8_t effective[MONO_PARAMS];
+    uint8_t control[MONO_PARAMS];
     float smoothed[MONO_PARAMS];
     mono_step_t steps[MONO_STEPS];
 
     int note;
     int last_note;
     int velocity;
+    uint8_t held_notes[128];
+    uint8_t held_velocity[128];
+    uint32_t held_order[128];
+    uint32_t note_order;
     int gate_left;
     float freq;
     float target_freq;
@@ -87,6 +100,9 @@ typedef struct {
     mono_svf_t hp[2];
     mono_svf_t lp[2];
     mono_svf_t eq;
+    mono_svf_coeff_t hp_coeff;
+    mono_svf_coeff_t lp_coeff;
+    mono_svf_coeff_t eq_coeff;
 
     int srr_left;
     float srr_hold;
@@ -120,6 +136,7 @@ struct mono {
     float bpm_override;
     float master;
     float smooth_coeff;
+    int control_phase;
     uint32_t revision;
     uint32_t note_events;
     uint32_t render_blocks;
@@ -127,6 +144,14 @@ struct mono {
     int render_peak;
     int lifetime_peak;
     uint32_t nonfinite_samples;
+    float time_2[128];
+    float time_3[128];
+    float time_4[128];
+    float time_8[128];
+    float time_12[128];
+    float slew_coeff[128];
+    float cutoff_g[128];
+    float lfo_key_rate[128][128];
     float wavetable[MONO_WAVES][MONO_WAVE_LEN];
     mono_track_t track[MONO_MAX_TRACKS];
 };
@@ -203,8 +228,10 @@ static int is_smoothable_param(const mono_track_t *t, int pid) {
 }
 
 static void sync_smoothed(mono_track_t *t) {
-    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+    for (int pid = 0; pid < MONO_PARAMS; ++pid) {
         t->smoothed[pid] = (float)t->effective[pid];
+        t->control[pid] = t->effective[pid];
+    }
 }
 
 static void reset_effective_to_base(mono_t *m) {
@@ -212,12 +239,11 @@ static void reset_effective_to_base(mono_t *m) {
         memcpy(m->track[track].effective, m->track[track].base, MONO_PARAMS);
 }
 
-static void smooth_param_value(const mono_t *m, mono_track_t *t,
-                               uint8_t *rendered, int pid) {
+static void smooth_param_value(const mono_t *m, mono_track_t *t, int pid) {
     float target = (float)t->effective[pid];
     t->smoothed[pid] += (target - t->smoothed[pid]) * m->smooth_coeff;
     if (fabsf(target - t->smoothed[pid]) < 0.001f) t->smoothed[pid] = target;
-    rendered[pid] = (uint8_t)iclamp((int)lrintf(t->smoothed[pid]), 0, 127);
+    t->control[pid] = (uint8_t)iclamp((int)lrintf(t->smoothed[pid]), 0, 127);
 }
 
 static int lfo_destination_index(int value) {
@@ -264,6 +290,27 @@ static float pnorm(int p) {
 static float time_from_param(int p, float max_seconds) {
     if (p <= 0) return 0.0f;
     return 0.002f * powf(max_seconds / 0.002f, pnorm(p));
+}
+
+static void build_control_tables(mono_t *m) {
+    for (int p = 0; p < 128; ++p) {
+        m->time_2[p] = time_from_param(p, 2.0f);
+        m->time_3[p] = time_from_param(p, 3.0f);
+        m->time_4[p] = time_from_param(p, 4.0f);
+        m->time_8[p] = time_from_param(p, 8.0f);
+        m->time_12[p] = time_from_param(p, 12.0f);
+        float slew = m->time_2[p];
+        m->slew_coeff[p] = slew > 0.0f
+            ? 1.0f - expf(-1.0f / (slew * m->sample_rate)) : 1.0f;
+        float hz = 18.0f * powf(1000.0f, pnorm(p));
+        hz = fclamp(hz, 15.0f, m->sample_rate * 0.45f);
+        m->cutoff_g[p] = tanf((float)M_PI * hz / m->sample_rate);
+        for (int note = 0; note < 128; ++note) {
+            float key_scale = ((int)p - 64) / 64.0f;
+            m->lfo_key_rate[p][note] =
+                powf(2.0f, ((note - 60) / 12.0f) * key_scale);
+        }
+    }
 }
 
 static float bpm_now(const mono_t *m) {
@@ -407,7 +454,9 @@ mono_t *mono_create(const host_api_v1_t *host, int track_count) {
     m->seq_direction = 1;
     m->seq_rng = 0x51f15e5du;
     m->master = m->track_count > 1 ? 0.34f : 0.7f;
-    m->smooth_coeff = 1.0f - expf(-1.0f / (0.030f * m->sample_rate));
+    m->smooth_coeff = 1.0f - expf(-MONO_CONTROL_INTERVAL /
+                                  (0.030f * m->sample_rate));
+    build_control_tables(m);
     generate_wavetables(m);
     int delay_frames = m->sample_rate * MONO_DELAY_SECONDS;
     for (int i = 0; i < m->track_count; ++i) {
@@ -439,38 +488,38 @@ static void env_trigger(mono_env_t *e, int attack_param, int sample_rate) {
     (void)sample_rate;
 }
 
-static void env_release(mono_env_t *e, int release_param, int sample_rate) {
+static void env_release(const mono_t *m, mono_env_t *e, int release_param) {
     if (e->stage == ENV_OFF) return;
-    float sec = time_from_param(release_param, 8.0f);
+    float sec = m->time_8[iclamp(release_param, 0, 127)];
     if (sec <= 0.0f) {
         e->value = 0.0f;
         e->stage = ENV_OFF;
     } else {
-        e->release_step = e->value / (sec * sample_rate);
+        e->release_step = e->value / (sec * m->sample_rate);
         e->stage = ENV_RELEASE;
     }
 }
 
-static float amp_env_tick(mono_env_t *e, const uint8_t *p, int sample_rate) {
+static float amp_env_tick(const mono_t *m, mono_env_t *e, const uint8_t *p) {
     switch (e->stage) {
     case ENV_ATTACK: {
-        float sec = time_from_param(p[0], 4.0f);
-        e->value += sec <= 0.0f ? 1.0f : 1.0f / (sec * sample_rate);
+        float sec = m->time_4[p[0]];
+        e->value += sec <= 0.0f ? 1.0f : 1.0f / (sec * m->sample_rate);
         if (e->value >= 1.0f) {
             e->value = 1.0f;
-            e->hold_left = (int)(time_from_param(p[1], 4.0f) * sample_rate);
+            e->hold_left = (int)(m->time_4[p[1]] * m->sample_rate);
             e->stage = ENV_HOLD;
         }
         break;
     }
     case ENV_HOLD:
         if (e->hold_left <= 0)
-            e->hold_left = (int)(time_from_param(p[1], 4.0f) * sample_rate);
+            e->hold_left = (int)(m->time_4[p[1]] * m->sample_rate);
         if (--e->hold_left <= 0) e->stage = ENV_DECAY;
         break;
     case ENV_DECAY: {
-        float sec = time_from_param(p[2], 12.0f);
-        e->value -= sec <= 0.0f ? 1.0f : 1.0f / (sec * sample_rate);
+        float sec = m->time_12[p[2]];
+        e->value -= sec <= 0.0f ? 1.0f : 1.0f / (sec * m->sample_rate);
         if (e->value <= 0.0f) { e->value = 0.0f; e->stage = ENV_OFF; }
         break;
     }
@@ -483,14 +532,14 @@ static float amp_env_tick(mono_env_t *e, const uint8_t *p, int sample_rate) {
     return e->value;
 }
 
-static float filter_env_tick(mono_env_t *e, const uint8_t *p, int sample_rate) {
+static float filter_env_tick(const mono_t *m, mono_env_t *e, const uint8_t *p) {
     if (e->stage == ENV_ATTACK) {
-        float sec = time_from_param(p[4], 4.0f);
-        e->value += sec <= 0.0f ? 1.0f : 1.0f / (sec * sample_rate);
+        float sec = m->time_4[p[4]];
+        e->value += sec <= 0.0f ? 1.0f : 1.0f / (sec * m->sample_rate);
         if (e->value >= 1.0f) { e->value = 1.0f; e->stage = ENV_DECAY; }
     } else if (e->stage == ENV_DECAY || e->stage == ENV_HOLD) {
-        float sec = time_from_param(p[5], 8.0f);
-        e->value -= sec <= 0.0f ? 1.0f : 1.0f / (sec * sample_rate);
+        float sec = m->time_8[p[5]];
+        e->value -= sec <= 0.0f ? 1.0f : 1.0f / (sec * m->sample_rate);
         if (e->value <= 0.0f) { e->value = 0.0f; e->stage = ENV_OFF; }
     }
     return e->value;
@@ -507,18 +556,18 @@ static void lfo_trigger(mono_lfo_t *l, const uint8_t *p) {
     }
 }
 
-static float lfo_tick(mono_lfo_t *l, const uint8_t *p, const uint8_t *x,
-                      float bpm, int sample_rate, int velocity, int note) {
+static float lfo_tick(const mono_t *m, mono_lfo_t *l, const uint8_t *p,
+                      const uint8_t *x, float bpm, int velocity, int note) {
     int wave = (p[2] * 5) / 128;
     int mode = (p[1] * 5) / 128;
     static const float mults[8] = { 0.125f, 0.25f, 0.5f, 1, 2, 4, 8, 16 };
     int mi = (p[3] * 8) / 128;
-    float key_scale = ((int)x[7] - 64) / 64.0f;
-    float key_rate = powf(2.0f, ((note - 60) / 12.0f) * key_scale);
+    int key = iclamp(x[7], 0, 127);
+    float key_rate = m->lfo_key_rate[key][iclamp(note, 0, 127)];
     float hz = (bpm / 60.0f) * mults[mi] * (0.125f + 3.875f * pnorm(p[4])) * key_rate;
     float old = l->phase;
     if (!l->stopped) {
-        l->phase += hz / sample_rate;
+        l->phase += hz / m->sample_rate;
         if (l->phase >= 1.0f) l->phase -= 1.0f;
     }
     if (l->phase < old && wave == 4)
@@ -550,14 +599,10 @@ static float lfo_tick(mono_lfo_t *l, const uint8_t *p, const uint8_t *x,
         v = roundf(v * (levels - 1)) / (levels - 1);
     }
     if (x[5] < 64) v = 0.5f * (v + 1.0f);
-    float slew = time_from_param(x[2], 2.0f);
-    if (slew > 0.0f)
-        l->slewed += (v - l->slewed) * (1.0f - expf(-1.0f / (slew * sample_rate)));
-    else
-        l->slewed = v;
-    float delay = time_from_param(x[1], 4.0f);
-    float fade = time_from_param(x[0], 8.0f);
-    float age = l->age_samples++ / (float)sample_rate;
+    l->slewed += (v - l->slewed) * m->slew_coeff[x[2]];
+    float delay = m->time_4[x[1]];
+    float fade = m->time_8[x[0]];
+    float age = l->age_samples++ / (float)m->sample_rate;
     float fade_gain = age < delay ? 0.0f
         : (fade > 0.0f ? fclamp((age - delay) / fade, 0.0f, 1.0f) : 1.0f);
     float velocity_mix = pnorm(x[6]);
@@ -571,6 +616,31 @@ static void track_pitch(mono_track_t *t, int note, int velocity) {
     t->velocity = iclamp(velocity, 1, 127);
     t->target_freq = midi_freq(note);
     if (t->freq <= 0.0f || t->effective[15] == 0) t->freq = t->target_freq;
+}
+
+static int most_recent_held_note(const mono_track_t *t) {
+    uint32_t newest = 0;
+    int selected = -1;
+    for (int note = 0; note < 128; ++note) {
+        if (t->held_notes[note] && (selected < 0 || t->held_order[note] > newest)) {
+            newest = t->held_order[note];
+            selected = note;
+        }
+    }
+    return selected;
+}
+
+static void hold_note(mono_track_t *t, int note, int velocity) {
+    note = iclamp(note, 0, 127);
+    if (++t->note_order == 0) {
+        /* A wrap would only happen after billions of note-ons. Preserve a
+         * deterministic last-note ordering instead of letting zero sort old. */
+        t->note_order = 1;
+        memset(t->held_order, 0, sizeof(t->held_order));
+    }
+    t->held_notes[note] = 1;
+    t->held_velocity[note] = (uint8_t)iclamp(velocity, 1, 127);
+    t->held_order[note] = t->note_order;
 }
 
 static void track_trigger(mono_t *m, mono_track_t *t, int note,
@@ -599,7 +669,9 @@ void mono_note_on(mono_t *m, int track, int note, int velocity) {
     /* While clocked, keep the current automation targets under incoming Move
      * notes. Stopped performance notes still start from the base patch. */
     if (!m->transport) memcpy(t->effective, t->base, MONO_PARAMS);
-    track_trigger(m, t, iclamp(note, 0, 127), velocity, 15, 0);
+    note = iclamp(note, 0, 127);
+    hold_note(t, note, velocity);
+    track_trigger(m, t, note, velocity, 15, 0);
     ++m->note_events;
     changed(m);
 }
@@ -607,11 +679,26 @@ void mono_note_on(mono_t *m, int track, int note, int velocity) {
 void mono_note_off(mono_t *m, int track, int note) {
     if (!m || track < 0 || track >= m->track_count) return;
     mono_track_t *t = &m->track[track];
-    if (note < 0 || t->note == note) {
-        env_release(&t->amp, t->effective[11], m->sample_rate);
-        t->gate_left = 0;
-        changed(m);
+    if (note < 0) {
+        memset(t->held_notes, 0, sizeof(t->held_notes));
+        memset(t->held_order, 0, sizeof(t->held_order));
+    } else if (note < 128) {
+        t->held_notes[note] = 0;
+        t->held_order[note] = 0;
     }
+    if (note < 0 || t->note == note) {
+        int fallback = most_recent_held_note(t);
+        if (fallback >= 0) {
+            /* Return to the previous held key without retriggering envelopes;
+             * portamento still controls the pitch transition. */
+            track_pitch(t, fallback, t->held_velocity[fallback]);
+        } else {
+            env_release(m, &t->amp, t->effective[11]);
+            t->note = -1;
+            t->gate_left = 0;
+        }
+    }
+    changed(m);
 }
 
 static float osc_swavesaw(mono_t *m, mono_track_t *t, float freq) {
@@ -834,27 +921,27 @@ static float oscillator(mono_t *m, mono_track_t *t, float freq) {
     return secondary_finish(t, v);
 }
 
-static float cutoff_from_param(float p) {
-    return 18.0f * powf(1000.0f, fclamp(p, 0.0f, 127.0f) / 127.0f);
+static void svf_coeff(const mono_t *m, mono_svf_coeff_t *c,
+                      float cutoff_param, float resonance) {
+    int cutoff = iclamp((int)lrintf(cutoff_param), 0, 127);
+    float g = m->cutoff_g[cutoff];
+    c->k = 2.0f - 1.95f * fclamp(resonance, 0.0f, 1.0f);
+    c->a1 = 1.0f / (1.0f + g * (g + c->k));
+    c->a2 = g * c->a1;
+    c->a3 = g * c->a2;
 }
 
-static float svf(mono_svf_t *s, float in, float hz, float resonance,
-                 int sample_rate, int highpass) {
+static float svf(mono_svf_t *s, float in, const mono_svf_coeff_t *c,
+                 int highpass) {
     /* Topology-preserving state-variable filter. The former Chamberlin
      * integrator became unstable at the default wide-open cutoff, poisoning
      * its state with NaNs after a few blocks and silencing every later note. */
-    hz = fclamp(hz, 15.0f, sample_rate * 0.45f);
-    float g = tanf((float)M_PI * hz / sample_rate);
-    float k = 2.0f - 1.95f * fclamp(resonance, 0.0f, 1.0f);
-    float a1 = 1.0f / (1.0f + g * (g + k));
-    float a2 = g * a1;
-    float a3 = g * a2;
     float v3 = in - s->low;
-    float band = a1 * s->band + a2 * v3;
-    float low = s->low + a2 * s->band + a3 * v3;
+    float band = c->a1 * s->band + c->a2 * v3;
+    float low = s->low + c->a2 * s->band + c->a3 * v3;
     s->band = 2.0f * band - s->band;
     s->low = 2.0f * low - s->low;
-    float high = in - k * band - low;
+    float high = in - c->k * band - low;
     if (!isfinite(high) || !isfinite(low) || !isfinite(s->band) ||
         !isfinite(s->low)) {
         s->band = 0.0f;
@@ -864,8 +951,8 @@ static float svf(mono_svf_t *s, float in, float hz, float resonance,
     return highpass ? high : low;
 }
 
-static float render_track(mono_t *m, mono_track_t *t, float *right) {
-    float bpm = bpm_now(m);
+static float render_track(mono_t *m, mono_track_t *t, float *right,
+                          float bpm, int control_tick) {
     uint8_t targets[MONO_PARAMS];
     uint8_t unmodulated[MONO_PARAMS];
     uint8_t modulated[MONO_PARAMS];
@@ -873,10 +960,16 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     int target_pid[3] = {-1, -1, -1};
     float target_delta[3] = {0};
     memcpy(targets, t->effective, sizeof(targets));
-    memcpy(unmodulated, targets, sizeof(unmodulated));
-    for (int pid = 0; pid < MONO_PARAMS; ++pid)
-        if (is_smoothable_param(t, pid))
-            smooth_param_value(m, t, unmodulated, pid);
+    if (control_tick) {
+        for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+            if (is_smoothable_param(t, pid)) smooth_param_value(m, t, pid);
+            else {
+                t->smoothed[pid] = (float)t->effective[pid];
+                t->control[pid] = t->effective[pid];
+            }
+        }
+    }
+    memcpy(unmodulated, t->control, sizeof(unmodulated));
     memcpy(modulated, unmodulated, sizeof(modulated));
 
     /* LFO controls receive the previous sample's modulation while the current
@@ -894,7 +987,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
         const uint8_t *lp = modulated + (4 + i) * 8;
         const uint8_t *lx = modulated + MONO_SHIFT_BASE + (4 + i) * MONO_PAGE_PARAMS;
         int dest = lfo_destination_index(lp[0]);
-        float v = lfo_tick(&t->lfo[i], lp, lx, bpm, m->sample_rate,
+        float v = lfo_tick(m, &t->lfo[i], lp, lx, bpm,
                            t->velocity, t->note >= 0 ? t->note : t->last_note);
         if (dest == 1) {
             pitch_mod += v * 24.0f;
@@ -930,10 +1023,12 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     memcpy(t->lfo_param_mod, next_lfo_mod, sizeof(next_lfo_mod));
     memcpy(t->effective, modulated, sizeof(modulated));
 
-    if (t->gate_left > 0 && --t->gate_left == 0)
-        env_release(&t->amp, t->effective[11], m->sample_rate);
+    if (t->gate_left > 0 && --t->gate_left == 0) {
+        env_release(m, &t->amp, t->effective[11]);
+        t->note = -1;
+    }
 
-    float port_sec = time_from_param(t->effective[15], 3.0f);
+    float port_sec = m->time_3[t->effective[15]];
     if (port_sec > 0.0f)
         t->freq += (t->target_freq - t->freq) / fmaxf(1.0f, port_sec * m->sample_rate);
     else
@@ -956,13 +1051,13 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     const uint8_t *fx = t->effective + MONO_SHIFT_BASE + 2 * MONO_PAGE_PARAMS;
     const uint8_t *ex = t->effective + MONO_SHIFT_BASE + 3 * MONO_PAGE_PARAMS;
     env_stage_t amp_stage = t->amp.stage;
-    float aenv = amp_env_tick(&t->amp, ap, m->sample_rate);
+    float aenv = amp_env_tick(m, &t->amp, ap);
     int curve_param = amp_stage == ENV_ATTACK ? ax[0]
         : (amp_stage == ENV_RELEASE ? ax[2] : ax[1]);
     float curve_power = powf(4.0f, ((int)curve_param - 64) / 64.0f);
     aenv = powf(fclamp(aenv, 0.0f, 1.0f), curve_power);
     aenv = 1.0f - pnorm(ax[5]) + aenv * pnorm(ax[5]);
-    float fenv = filter_env_tick(&t->filter_env, fp, m->sample_rate) * pnorm(fx[2]);
+    float fenv = filter_env_tick(m, &t->filter_env, fp) * pnorm(fx[2]);
     float velocity_sensitivity = pnorm(ax[3]);
     float vel = 1.0f - velocity_sensitivity +
                 velocity_sensitivity * t->velocity / 127.0f;
@@ -986,24 +1081,26 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     float width = fp[1] + (((int)fp[7] - 64) * fenv);
     base = fclamp(base, 0.0f, 127.0f);
     width = fclamp(width, 0.0f, 127.0f);
-    float hp_hz = cutoff_from_param(base);
     float lp_param = base + (127.0f - base) * (width / 127.0f);
-    float lp_hz = cutoff_from_param(lp_param);
-    x = svf(&t->hp[0], x, hp_hz, pnorm(fp[2]), m->sample_rate, 1);
+    if (control_tick) {
+        svf_coeff(m, &t->hp_coeff, base, pnorm(fp[2]));
+        svf_coeff(m, &t->lp_coeff, lp_param, pnorm(fp[3]));
+    }
+    x = svf(&t->hp[0], x, &t->hp_coeff, 1);
     if (fx[4] >= 64)
-        x = svf(&t->hp[1], x, hp_hz, pnorm(fp[2]), m->sample_rate, 1);
-    x = svf(&t->lp[0], x, lp_hz, pnorm(fp[3]), m->sample_rate, 0);
+        x = svf(&t->hp[1], x, &t->hp_coeff, 1);
+    x = svf(&t->lp[0], x, &t->lp_coeff, 0);
     if (fx[5] >= 64)
-        x = svf(&t->lp[1], x, lp_hz, pnorm(fp[3]), m->sample_rate, 0);
+        x = svf(&t->lp[1], x, &t->lp_coeff, 0);
     x = filter_dry + (x - filter_dry) * pnorm(fx[6]);
     if (fx[7]) {
         float saturation = 1.0f + pnorm(fx[7]) * 10.0f;
         x = tanhf(x * saturation) / tanhf(saturation);
     }
 
-    float eq_hz = cutoff_from_param(ep[0]);
     float eq_q = fclamp(0.4f + ((int)ex[0] - 64) * (0.35f / 64.0f), 0.05f, 0.95f);
-    float band = svf(&t->eq, x, eq_hz, eq_q, m->sample_rate, 0);
+    if (control_tick) svf_coeff(m, &t->eq_coeff, ep[0], eq_q);
+    float band = svf(&t->eq, x, &t->eq_coeff, 0);
     float eq_wet = x + band * (((int)ep[1] - 64) / 64.0f);
     x += (eq_wet - x) * pnorm(ex[1]);
 
@@ -1117,7 +1214,7 @@ void mono_advance_step(mono_t *m) {
     }
 }
 
-static void internal_clock_tick(mono_t *m) {
+static void internal_clock_tick(mono_t *m, float bpm) {
     if (!m->transport) return;
     if (m->external_clock) {
         if (++m->external_clock_age < m->sample_rate) return;
@@ -1126,7 +1223,7 @@ static void internal_clock_tick(mono_t *m) {
         m->external_clock = 0;
         m->internal_frames = 0;
     }
-    double frames_per_step = m->sample_rate * 60.0 / (bpm_now(m) * 4.0);
+    double frames_per_step = m->sample_rate * 60.0 / (bpm * 4.0);
     m->internal_frames += 1.0;
     if (m->internal_frames >= frames_per_step) {
         m->internal_frames -= frames_per_step;
@@ -1137,12 +1234,14 @@ static void internal_clock_tick(mono_t *m) {
 void mono_render(mono_t *m, int16_t *out_lr, int frames) {
     if (!m || !out_lr || frames <= 0) return;
     int peak = 0;
+    float bpm = bpm_now(m);
     for (int i = 0; i < frames; ++i) {
-        internal_clock_tick(m);
+        int control_tick = m->control_phase == 0;
+        internal_clock_tick(m, bpm);
         float l = 0.0f, r = 0.0f;
         for (int t = 0; t < m->track_count; ++t) {
             float tr = 0.0f;
-            l += render_track(m, &m->track[t], &tr);
+            l += render_track(m, &m->track[t], &tr, bpm, control_tick);
             r += tr;
         }
         l = tanhf(l * m->master);
@@ -1161,6 +1260,7 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
         int ar = out_lr[i * 2 + 1] < 0 ? -out_lr[i * 2 + 1] : out_lr[i * 2 + 1];
         if (al > peak) peak = al;
         if (ar > peak) peak = ar;
+        if (++m->control_phase >= MONO_CONTROL_INTERVAL) m->control_phase = 0;
     }
     m->render_peak = peak;
     ++m->render_blocks;

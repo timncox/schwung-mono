@@ -2,7 +2,7 @@ CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wpedantic -Iinclude -Isrc
 LDLIBS = -lm
 
-.PHONY: test sanitize arm clean
+.PHONY: test bench sanitize arm clean
 
 test: build/host_sim
 	./build/host_sim
@@ -10,6 +10,13 @@ test: build/host_sim
 build/host_sim: src/mono_core.c src/mono_core.h test/host_sim.c include/plugin_api_v1.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) src/mono_core.c test/host_sim.c -o $@ $(LDLIBS)
+
+bench: build/benchmark
+	./build/benchmark
+
+build/benchmark: src/mono_core.c src/mono_core.h test/benchmark.c include/plugin_api_v1.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) src/mono_core.c test/benchmark.c -o $@ $(LDLIBS)
 
 sanitize:
 	@mkdir -p build
