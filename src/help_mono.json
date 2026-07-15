@@ -109,7 +109,10 @@
         "Save current keeps",
         "all 6 sounds, 64",
         "steps, play window,",
-        "order and locks."
+        "order and locks.",
+        "",
+        "Back closes preset",
+        "and setup screens."
       ]
     }
   ]

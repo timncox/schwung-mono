@@ -475,6 +475,12 @@ globalThis.onResume = function() {
     ready = fetchAll(); paintAll(true); resumePaints = 3; needsRedraw = true;
 };
 
+/* `suspend_keeps_js` normally reserves Back for Schwung's host-level suspend.
+ * Claim it only while Mono has an internal modal open; the host then forwards
+ * the original button event to onMidiMessageInternal(), which closes the modal.
+ * At the main instrument screen Back keeps its normal suspend behavior. */
+globalThis.wantsBack = function() { return presetMode || seqSetup; };
+
 globalThis.tick = function() {
     tickCount++;
     const active = shiftActive();

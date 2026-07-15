@@ -69,7 +69,9 @@ and wave remain stepped so automation never passes through an unintended mode.
 - **Mono six-track pattern:** inside the full-surface build, hold Shift and
   click the jog wheel. **Save current** captures all six sounds, all 64 steps,
   and every parameter lock; choosing a saved name recalls it without starting
-  transport automatically.
+  transport automatically. Back closes the naming screen or preset browser
+  without leaving Mono; at the main instrument screen it resumes its normal
+  Schwung suspend behavior.
 
 ## Build and test
 
