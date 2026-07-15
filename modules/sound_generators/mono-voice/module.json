@@ -110,7 +110,7 @@
         "filter_shift": {
           "name":"Shift Filter",
           "params":[
-            {"key":"flt9","name":"Key Track","type":"int","min":0,"max":127,"default":0},
+            {"key":"flt9","name":"Key Track","type":"int","min":0,"max":127,"default":127},
             {"key":"flt10","name":"Velocity Amount","type":"int","min":0,"max":127,"default":64},
             {"key":"flt11","name":"Envelope Amount","type":"int","min":0,"max":127,"default":127},
             {"key":"flt12","name":"Pre-Drive","type":"int","min":0,"max":127,"default":0},

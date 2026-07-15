@@ -197,7 +197,7 @@ const COMMON = [null,
   ["DEST","TRIG","WAVE","MULT","SPEED","INTERL","DEPTH","PHASE"]];
 const SYNTH = [
   ["UNISON L","UNISON W","UNISON X","SUB MIX","SUB 1","SUB 2","—","TUNE"],
-  ["UNISON L","UNISON W","UNISON X","P WIDTH","PW ATK","PW RST","—","TUNE"],
+  ["UNISON L","UNISON W","SUB 1","SUB 2","P WIDTH","PW ATK","PW RST","TUNE"],
   ["PITCH 2","PITCH 3","PITCH 4","WAVE","P WIDTH","CHORUS L","CHORUS W","TUNE"],
   ["P WIDTH","PW ATK","PW RST","WAVE","MOD","MOD SRC","MOD FREQ","TUNE"],
   ["WAVE","WAVE POS","WAVE MOD","WAVE RST","SYNC","SYNC FREQ","—","TUNE"],
@@ -245,11 +245,25 @@ const lfoModeIndex = value => Math.max(0,Math.min(4,Math.floor(Math.max(0,Math.m
 const currentParamId = i => (altLayer?56:0)+number("page")*8+i;
 const secondsFromParam = (value,max) => value<=0?0:.002*Math.pow(max/.002,value/127);
 const formatTime = seconds => seconds<=0?"0 ms":seconds<1?`${Math.round(seconds*1000)} ms`:`${seconds.toFixed(seconds<10?2:1)} s`;
+const FM_RATIO_NAMES=["1/64","1/32","1/16","3/32","1/8","3/16","1/4","5/16","3/8","7/16","1/2","5/8","3/4","7/8","1","1.25","1.5","1.75","2","2.5","3","3.5","4","5","6","7","8","9","10","12","16","24"];
+const bandIndex=(value,count)=>Math.max(0,Math.min(count-1,Math.floor(value*count/128)));
+function parameterNoteName(value){const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];return `${names[value%12]}${Math.floor(value/12)-1}`;}
+function machineParameterValue(i,value){
+  if(altLayer||number("page")!==0)return null;
+  const machine=number("machine");
+  if(machine===1&&i===6)return value<64?"Off":"On";
+  if(machine===2&&i<3){if(value<4)return "Off";if(value>=112)return ["6/5","5/4","4/3","3/2"][Math.min(3,Math.floor((value-112)/4))];return `${Math.round((value-4)*24/107)} semitones`;}
+  if(machine===3){if(i===2)return value<64?"Off":"On";if(i===3)return ["Triangle","Saw","Pulse","Mixed","Noise"][bandIndex(value,5)];if(i===4)return ["Off","Ring","Sync","Ring + Sync"][bandIndex(value,4)];if(i===5)return value<64?"MFRQ":"Previous track";if(i===6)return parameterNoteName(value);}
+  if(machine===4){if(i===0)return `Wave ${String(bandIndex(value,32)).padStart(2,"0")}`;if(i===3)return value<64?"Off":"On";if(i===4)return ["Off","SFRQ","Previous track"][bandIndex(value,3)];if(i===5)return parameterNoteName(value);}
+  if(machine===5&&(i===0||i===4))return FM_RATIO_NAMES[bandIndex(value,32)];
+  return null;
+}
 function formatParameter(i,value){
+  const machineValue=machineParameterValue(i,value);if(machineValue!==null)return machineValue;
   const pid=currentParamId(i),times={8:4,9:4,10:12,11:8,15:3,20:4,21:8,88:8,89:4,90:2,96:8,97:4,98:2,104:8,105:4,106:2};
   if(times[pid])return formatTime(secondsFromParam(value,times[pid]));
   if(pid===28)return formatTime(.015+1.82*value/127);
-  if(pid===16||pid===24){const hz=18*Math.pow(1000,value/127);return hz>=1000?`${(hz/1000).toFixed(1)} kHz`:`${Math.round(hz)} Hz`;}
+  if(pid===24){const hz=18*Math.pow(1000,value/127);return hz>=1000?`${(hz/1000).toFixed(1)} kHz`:`${Math.round(hz)} Hz`;}
   if(pid===7)return `${Math.round((value-64)*100/64)} cents`;
   if(pid===14){const pan=Math.round((value-64)*100/64);return pan===0?"Center":`${pan<0?"L":"R"} ${Math.abs(pan)}%`;}
   if(pid===25)return `${value>=64?"+":""}${value-64} dB`;

@@ -1,6 +1,6 @@
 ---
 status: active
-last_touched: 2026-07-14
+last_touched: 2026-07-15
 ---
 
 # Mono
@@ -37,6 +37,14 @@ The wavetable bank is generated from original mathematical wave recipes at
 startup. User waveform import and reference-hardware calibration are later
 milestones.
 
+SuperWave saw/pulse edges are PolyBLEP band-limited. Pulse follows the
+documented base + close-unison-pair + two-sine-sub topology; Ensemble provides
+four optional pitched voices and chorus companions. SID uses a 24-bit phase
+counter approximation and a 23-bit pitch-clocked noise LFSR. DigiPRO maintains
+32 generated 512-sample/12-bit waves. FM+ Static uses the displayed ratio list,
+per-block feedback, a combined envelope/volume response, and harmonic Tone
+scaling.
+
 ## Parameter pages
 
 - 0 SYNTH: eight machine-specific controls.
@@ -57,13 +65,19 @@ milestones.
 - Shift + LFO 1-3: fade, delay, slew, symmetry, steps, polarity, velocity
   response, and key tracking.
 
+FILTER BASE is the high-pass edge and WDTH is the octave distance to the
+low-pass edge. Both controls advance one octave per eight steps; full key
+tracking places BASE 0 two octaves below the played note. New tracks default
+to full key tracking.
+
 Each LFO destination is a direct 0-113 enum: Off, Pitch, then parameter IDs
 0-111. Modulation of LFO parameters is fed into the following sample and
 clamped, allowing cross- and self-modulation without recursive evaluation.
-State v8 stores this direct map, per-track timing and performance state,
+State v9 stores this direct map, per-track timing and performance state,
 machine-specific sound memories, and advanced step behavior while packing
-112-bit lock masks and 7-bit lock values compactly. State v2-v7 patches migrate
-on load; v2/v3 seven-destination LFO routings are translated to the direct map.
+112-bit lock masks and 7-bit lock values compactly. State v2-v8 patches migrate
+on load; v2/v3 seven-destination LFO routings are translated to the direct map,
+and v2-v8 Pulse panels/locks migrate to the corrected primary layout.
 
 The engine keeps Trigger and Wave in their original 0-127 state slots, split
 into five equal bands. Custom Move and browser UIs present those bands as
@@ -114,8 +128,9 @@ in the audio render path.
 
 The public manual documents topology and control intent but not the original
 coefficient tables, nonlinearities, FM response curves, or factory waveform
-data. Current algorithms are original approximations with deliberately crisp
-digital behavior. Close calibration requires recordings from a reference
+data. Spectral, parameter-routing, restart, source-selection, and filter-octave
+tests now protect the documented behaviors, but the algorithms remain original
+approximations. Close calibration requires recordings from a reference
 Monomachine across controlled MIDI parameter sweeps.
 
 ## Verification

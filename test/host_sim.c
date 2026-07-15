@@ -8,6 +8,7 @@
 #include "mono_core.h"
 
 #define BLOCK 128
+#define SPECTRAL_N 4096
 
 static int bpm_calls;
 static float sim_bpm(void) { bpm_calls++; return 120.0f; }
@@ -56,6 +57,30 @@ static uint64_t render_hash_long(mono_t *m) {
     return h;
 }
 
+static uint64_t raw_hash(mono_t *m, int track, float frequency, int frames) {
+    float out[2048];
+    assert(frames > 0 && frames <= (int)(sizeof(out) / sizeof(out[0])));
+    mono_debug_render_oscillator(m, track, frequency, out, frames);
+    uint64_t h = UINT64_C(1469598103934665603);
+    for (int i = 0; i < frames; ++i) {
+        uint32_t bits;
+        memcpy(&bits, &out[i], sizeof(bits));
+        h ^= bits;
+        h *= UINT64_C(1099511628211);
+    }
+    return h;
+}
+
+static double spectral_bin(const float *samples, int count, int bin) {
+    double real = 0.0, imag = 0.0;
+    for (int i = 0; i < count; ++i) {
+        double phase = 2.0 * M_PI * bin * i / count;
+        real += samples[i] * cos(phase);
+        imag -= samples[i] * sin(phase);
+    }
+    return 2.0 * hypot(real, imag) / count;
+}
+
 static int get_int(mono_t *m, const char *key) {
     char buf[256];
     assert(mono_get_param(m, key, buf, sizeof(buf)) >= 0);
@@ -82,6 +107,213 @@ static void test_all_machines_sound_distinct(void) {
     for (int i = 0; i < MONO_MACHINE_COUNT; ++i)
         for (int j = i + 1; j < MONO_MACHINE_COUNT; ++j)
             assert(hashes[i] != hashes[j]);
+}
+
+static void test_superwave_saw_rejects_folded_harmonics(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "machine", "0");
+    mono_set_param(m, "syn1", "0");
+    mono_set_param(m, "syn3", "0");
+    mono_set_param(m, "syn4", "0");
+    mono_set_param(m, "syn5", "0");
+    mono_set_param(m, "syn6", "0");
+    mono_set_param(m, "alt1", "0");
+    float samples[SPECTRAL_N];
+    const int fundamental_bin = 700;
+    float frequency = host.sample_rate * fundamental_bin / (float)SPECTRAL_N;
+    mono_debug_render_oscillator(m, 0, frequency, samples, SPECTRAL_N);
+    double fundamental = spectral_bin(samples, SPECTRAL_N, fundamental_bin);
+    /* The third harmonic lies above Nyquist and would fold to bin 1996 in a
+     * naive saw. PolyBLEP should keep that false component well below the
+     * actual fundamental. */
+    double folded_third = spectral_bin(samples, SPECTRAL_N,
+                                       SPECTRAL_N - fundamental_bin * 3);
+    assert(fundamental > 0.25);
+    assert(folded_third < fundamental * 0.15);
+    mono_destroy(m);
+}
+
+static void test_superwave_pulse_primary_controls_are_wired(void) {
+    const char *keys[] = { "syn3", "syn4", "syn5", "syn6" };
+    for (int control = 0; control < 4; ++control) {
+        mono_t *low = mono_create(&host, 1);
+        mono_t *high = mono_create(&host, 1);
+        assert(low && high);
+        mono_set_param(low, "machine", "1");
+        mono_set_param(high, "machine", "1");
+        mono_set_param(low, keys[control], "0");
+        mono_set_param(high, keys[control], "127");
+        assert(raw_hash(low, 0, 220.0f, 2048) !=
+               raw_hash(high, 0, 220.0f, 2048));
+        mono_destroy(low);
+        mono_destroy(high);
+    }
+}
+
+static void configure_ensemble(mono_t *m) {
+    mono_set_param(m, "machine", "2");
+    mono_set_param(m, "alt1", "127");
+    mono_set_param(m, "alt2", "127");
+    mono_set_param(m, "alt3", "127");
+    mono_set_param(m, "alt4", "127");
+}
+
+static void test_ensemble_wave_and_chorus_controls_are_wired(void) {
+    const char *keys[] = { "syn4", "syn5", "syn6", "syn7" };
+    for (int control = 0; control < 4; ++control) {
+        mono_t *low = mono_create(&host, 1);
+        mono_t *high = mono_create(&host, 1);
+        assert(low && high);
+        configure_ensemble(low);
+        configure_ensemble(high);
+        /* Chorus width needs an audible chorus level to expose its spread. */
+        if (control == 3) {
+            mono_set_param(low, "syn6", "127");
+            mono_set_param(high, "syn6", "127");
+        }
+        mono_set_param(low, keys[control], "0");
+        mono_set_param(high, keys[control], "127");
+        assert(raw_hash(low, 0, 220.0f, 2048) !=
+               raw_hash(high, 0, 220.0f, 2048));
+        mono_destroy(low);
+        mono_destroy(high);
+    }
+}
+
+static mono_t *configured_cross_track_machine(int machine, int previous_note,
+                                               int source_param) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    mono_note_on(m, 0, previous_note, 110);
+    mono_set_param(m, "track", "1");
+    char value[16];
+    snprintf(value, sizeof(value), "%d", machine);
+    mono_set_param(m, "machine", value);
+    if (machine == MONO_SID_6581) {
+        mono_set_param(m, "syn4", "32"); /* saw */
+        mono_set_param(m, "syn5", "96"); /* hard sync */
+        mono_set_param(m, "syn6", source_param ? "127" : "0");
+        mono_set_param(m, "syn7", "64");
+    } else {
+        mono_set_param(m, "syn5", source_param ? "127" : "64");
+        mono_set_param(m, "syn6", "64");
+    }
+    mono_note_on(m, 1, 60, 110);
+    return m;
+}
+
+static void test_sid_and_digipro_previous_track_sources(void) {
+    for (int machine = MONO_SID_6581; machine <= MONO_DIGIPRO_WAVE; ++machine) {
+        mono_t *low = configured_cross_track_machine(machine, 36, 1);
+        mono_t *high = configured_cross_track_machine(machine, 84, 1);
+        assert(raw_hash(low, 1, 261.6256f, 2048) !=
+               raw_hash(high, 1, 261.6256f, 2048));
+        mono_destroy(low);
+        mono_destroy(high);
+    }
+
+    /* MFRQ/SFRQ mode must remain independent of the previous track. */
+    for (int machine = MONO_SID_6581; machine <= MONO_DIGIPRO_WAVE; ++machine) {
+        mono_t *low = configured_cross_track_machine(machine, 36, 0);
+        mono_t *high = configured_cross_track_machine(machine, 84, 0);
+        assert(raw_hash(low, 1, 261.6256f, 2048) ==
+               raw_hash(high, 1, 261.6256f, 2048));
+        mono_destroy(low);
+        mono_destroy(high);
+    }
+}
+
+static uint64_t sweep_after_retrigger(int machine, int restart) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    char value[16];
+    snprintf(value, sizeof(value), "%d", machine);
+    mono_set_param(m, "machine", value);
+    if (machine == MONO_SWAVE_PULSE) {
+        mono_set_param(m, "syn5", "80");  /* PW */
+        mono_set_param(m, "syn6", "127"); /* PWAD */
+        mono_set_param(m, "syn7", restart ? "127" : "0");
+    } else if (machine == MONO_SID_6581) {
+        mono_set_param(m, "syn2", "127"); /* PWAD */
+        mono_set_param(m, "syn3", restart ? "127" : "0");
+        mono_set_param(m, "syn4", "64");  /* pulse */
+    } else {
+        mono_set_param(m, "syn2", "24");  /* WP */
+        mono_set_param(m, "syn3", "112"); /* WPM */
+        mono_set_param(m, "syn4", restart ? "127" : "0");
+    }
+    mono_note_on(m, 0, 60, 110);
+    (void)raw_hash(m, 0, 261.6256f, 1536);
+    mono_note_on(m, 0, 60, 110);
+    uint64_t hash = raw_hash(m, 0, 261.6256f, 1536);
+    mono_destroy(m);
+    return hash;
+}
+
+static void test_sid_and_digipro_restart_their_sweeps(void) {
+    assert(sweep_after_retrigger(MONO_SWAVE_PULSE, 0) !=
+           sweep_after_retrigger(MONO_SWAVE_PULSE, 1));
+    assert(sweep_after_retrigger(MONO_SID_6581, 0) !=
+           sweep_after_retrigger(MONO_SID_6581, 1));
+    assert(sweep_after_retrigger(MONO_DIGIPRO_WAVE, 0) !=
+           sweep_after_retrigger(MONO_DIGIPRO_WAVE, 1));
+}
+
+static void test_fm_volume_envelope_and_tone_shape_spectrum(void) {
+    mono_t *carrier = mono_create(&host, 1);
+    mono_t *complex = mono_create(&host, 1);
+    assert(carrier && complex);
+    mono_set_param(carrier, "machine", "5");
+    mono_set_param(complex, "machine", "5");
+    mono_set_param(carrier, "syn4", "0");
+    mono_set_param(carrier, "syn6", "0");
+    mono_set_param(carrier, "syn7", "0");
+    mono_set_param(carrier, "alt4", "0");
+    mono_set_param(complex, "syn1", "56");
+    mono_set_param(complex, "syn3", "96");
+    mono_set_param(complex, "syn4", "127");
+    mono_set_param(complex, "syn5", "56");
+    mono_set_param(complex, "syn6", "112");
+    mono_set_param(complex, "syn7", "127");
+    float plain[SPECTRAL_N], rich[SPECTRAL_N];
+    const int fundamental_bin = 200;
+    float frequency = host.sample_rate * fundamental_bin / (float)SPECTRAL_N;
+    mono_debug_render_oscillator(carrier, 0, frequency, plain, SPECTRAL_N);
+    mono_debug_render_oscillator(complex, 0, frequency, rich, SPECTRAL_N);
+    double plain_upper = 0.0, rich_upper = 0.0;
+    for (int harmonic = 2; harmonic <= 6; ++harmonic) {
+        plain_upper += spectral_bin(plain, SPECTRAL_N, fundamental_bin * harmonic);
+        rich_upper += spectral_bin(rich, SPECTRAL_N, fundamental_bin * harmonic);
+    }
+    assert(spectral_bin(plain, SPECTRAL_N, fundamental_bin) > 0.5);
+    assert(rich_upper > plain_upper * 4.0);
+    mono_destroy(carrier);
+    mono_destroy(complex);
+}
+
+static void test_filter_uses_octave_steps_and_key_tracking(void) {
+    mono_t *middle = mono_create(&host, 1);
+    mono_t *upper = mono_create(&host, 1);
+    assert(middle && upper);
+    mono_set_param(middle, "flt1", "0");
+    mono_set_param(middle, "flt2", "8");
+    mono_set_param(middle, "flt9", "127");
+    mono_set_param(upper, "flt1", "0");
+    mono_set_param(upper, "flt2", "8");
+    mono_set_param(upper, "flt9", "127");
+    mono_note_on(middle, 0, 60, 100);
+    mono_note_on(upper, 0, 72, 100);
+    (void)render_energy(middle, 100);
+    (void)render_energy(upper, 100);
+    float middle_hp, middle_lp, upper_hp, upper_lp;
+    mono_debug_filter_cutoffs(middle, 0, &middle_hp, &middle_lp);
+    mono_debug_filter_cutoffs(upper, 0, &upper_hp, &upper_lp);
+    assert(fabsf(middle_lp / middle_hp - 2.0f) < 0.02f);
+    assert(fabsf(upper_hp / middle_hp - 2.0f) < 0.02f);
+    assert(fabsf(upper_lp / middle_lp - 2.0f) < 0.02f);
+    mono_destroy(middle);
+    mono_destroy(upper);
 }
 
 static void test_note_release(void) {
@@ -702,7 +934,7 @@ static void test_full_state_round_trip(void) {
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":8"));
+    assert(strstr(state, "\"v\":9"));
     assert(strstr(state, "\"data\":\"T0"));
 
     mono_set_param(restored, "transport", "1");
@@ -751,13 +983,13 @@ static void test_v3_lfo_destinations_migrate(void) {
     assert(source && restored);
     char state[4096];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":8");
+    char *version = strstr(state, "\"v\":9");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '3';
     data += strlen("\"data\":\"");
     assert(!strncmp(data, "T000", 4));
-    memmove(data + 4, data + 18, strlen(data + 18) + 1); /* strip v6-v8 track fields */
+    memmove(data + 4, data + 18, strlen(data + 18) + 1); /* strip v6-v9 track fields */
     memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
     memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
     memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
@@ -767,6 +999,56 @@ static void test_v3_lfo_destinations_migrate(void) {
     assert(get_int(restored, "lfo1_1") == 1);
     assert(get_int(restored, "lfo2_1") == 18);
     assert(get_int(restored, "lfo3_1") == 30);
+    mono_destroy(source);
+    mono_destroy(restored);
+}
+
+static void test_v8_pulse_panel_and_locks_migrate(void) {
+    mono_t *source = mono_create(&host, 1);
+    mono_t *restored = mono_create(&host, 1);
+    assert(source && restored);
+    mono_set_param(source, "machine", "1");
+    mono_set_param(source, "set_step", "0:60:110:100:15");
+    mono_set_param(source, "lock", "0:0:2:88");  /* old UNIX: discarded */
+    mono_set_param(source, "lock", "0:0:3:31");  /* old PW */
+    mono_set_param(source, "lock", "0:0:4:41");  /* old PWAD */
+    mono_set_param(source, "lock", "0:0:5:127"); /* old PWRS */
+    mono_set_param(source, "lock", "0:0:6:77");  /* old unused slot */
+
+    char state[8192];
+    assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
+    char *version = strstr(state, "\"v\":9");
+    char *data = strstr(state, "\"data\":\"");
+    assert(version && data);
+    version[4] = '8';
+    data += strlen("\"data\":\"");
+    assert(!strncmp(data, "T001", 4));
+    const char legacy_panel[] = "0A0B63212C7F4D42";
+    memcpy(data + 18, legacy_panel, sizeof(legacy_panel) - 1);
+    char *pulse_memory = strstr(data, "M001");
+    assert(pulse_memory);
+    memcpy(pulse_memory + 4, legacy_panel, sizeof(legacy_panel) - 1);
+
+    mono_set_param(restored, "state", state);
+    assert(get_int(restored, "machine") == MONO_SWAVE_PULSE);
+    assert(get_int(restored, "syn1") == 10);
+    assert(get_int(restored, "syn2") == 11);
+    assert(get_int(restored, "syn3") == 32);  /* new SUB1 default */
+    assert(get_int(restored, "syn4") == 0);   /* new SUB2 default */
+    assert(get_int(restored, "syn5") == 33);  /* old PW */
+    assert(get_int(restored, "syn6") == 44);  /* old PWAD */
+    assert(get_int(restored, "syn7") == 127); /* old PWRS */
+    assert(get_int(restored, "syn8") == 66);
+
+    mono_set_param(restored, "machine", "0");
+    mono_set_param(restored, "machine", "1");
+    assert(get_int(restored, "syn5") == 33);  /* machine memory migrated too */
+    mono_set_param(restored, "transport", "1");
+    assert(mono_debug_effective_param(restored, 0, 2) == 32);
+    assert(mono_debug_effective_param(restored, 0, 3) == 0);
+    assert(mono_debug_effective_param(restored, 0, 4) == 31);
+    assert(mono_debug_effective_param(restored, 0, 5) == 41);
+    assert(mono_debug_effective_param(restored, 0, 6) == 127);
     mono_destroy(source);
     mono_destroy(restored);
 }
@@ -908,6 +1190,13 @@ static void test_maximum_lock_state_fits_overtake_channel(void) {
 
 int main(void) {
     test_all_machines_sound_distinct();
+    test_superwave_saw_rejects_folded_harmonics();
+    test_superwave_pulse_primary_controls_are_wired();
+    test_ensemble_wave_and_chorus_controls_are_wired();
+    test_sid_and_digipro_previous_track_sources();
+    test_sid_and_digipro_restart_their_sweeps();
+    test_fm_volume_envelope_and_tone_shape_spectrum();
+    test_filter_uses_octave_steps_and_key_tracking();
     test_note_release();
     test_held_note_priority_and_block_tempo_lookup();
     test_filters_remain_finite_and_retrigger();
@@ -929,6 +1218,7 @@ int main(void) {
     test_remote_state_contract();
     test_full_state_round_trip();
     test_v3_lfo_destinations_migrate();
+    test_v8_pulse_panel_and_locks_migrate();
     test_v2_presets_receive_machine_shift_defaults();
     test_machine_memory_and_track_mute_solo();
     test_dense_pattern_fits_host_state_limit();

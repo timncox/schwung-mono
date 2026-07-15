@@ -951,31 +951,31 @@
         <article class="machine-card">
           <div class="machine-code"><span>M–02</span><span>SUPERWAVE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i></div>
-          <h3>SW Pulse</h3><p>A unison pulse stack with animated width. Good for hollow bass, nasal leads, and moving PWM beds.</p>
-          <ul><li>Pulse width</li><li>PWM</li><li>Shift: asym / sync / sub</li></ul>
+          <h3>SW Pulse</h3><p>A band-limited base pulse and unison pair with animated width plus two sine subs. Good for hollow bass, nasal leads, and moving PWM beds.</p>
+          <ul><li>Two sine subs</li><li>Pulse width + restart</li><li>Shift: asym / stack / sync</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–03</span><span>SUPERWAVE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:17px"></i><i style="--h:34px"></i><i style="--h:51px"></i><i style="--h:27px"></i><i style="--h:62px"></i><i style="--h:41px"></i><i style="--h:20px"></i><i style="--h:56px"></i><i style="--h:32px"></i><i style="--h:48px"></i><i style="--h:23px"></i><i style="--h:60px"></i></div>
-          <h3>SW Ensemble</h3><p>Four pitched oscillators with waveform, pulse width, and stereo chorus controls. The harmony machine.</p>
-          <ul><li>4 pitches</li><li>Wave</li><li>Shift: four voice levels</li></ul>
+          <h3>SW Ensemble</h3><p>Up to four pitched voices with Off and just-ratio choices, a saw-to-square-to-spike wave control, and chorus. The harmony machine.</p>
+          <ul><li>4 pitches</li><li>Wave + pulse width</li><li>Chorus level + width</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–04</span><span>DIGITAL CHIP</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:54px"></i><i style="--h:19px"></i><i style="--h:43px"></i><i style="--h:12px"></i><i style="--h:62px"></i><i style="--h:31px"></i><i style="--h:51px"></i><i style="--h:17px"></i><i style="--h:45px"></i><i style="--h:23px"></i><i style="--h:59px"></i><i style="--h:15px"></i></div>
-          <h3>SID 6581</h3><p>Chip-style digital oscillator with selectable waveform, modulation source, and hard-edged frequency interaction.</p>
-          <ul><li>Wave</li><li>Mod source</li><li>Shift: ring / sub / chaos</li></ul>
+          <h3>SID 6581</h3><p>Quantized chip-style oscillator with pitch-clocked noise, pulse-width animation, and selected or previous-track modulation sources.</p>
+          <ul><li>Five wave choices</li><li>Ring / sync modes</li><li>Shift: ring / sub / chaos</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–05</span><span>WAVETABLE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:13px"></i><i style="--h:28px"></i><i style="--h:52px"></i><i style="--h:38px"></i><i style="--h:61px"></i><i style="--h:25px"></i><i style="--h:46px"></i><i style="--h:17px"></i><i style="--h:56px"></i><i style="--h:34px"></i><i style="--h:22px"></i><i style="--h:63px"></i></div>
-          <h3>DigiPRO</h3><p>A factory-independent 512-sample, 12-bit wavetable voice with position modulation and oscillator sync.</p>
-          <ul><li>Wave position</li><li>Mod</li><li>Shift: second wavetable</li></ul>
+          <h3>DigiPRO</h3><p>A factory-independent bank of 32 512-sample, 12-bit waves with position animation, restart, and oscillator sync.</p>
+          <ul><li>Wave position + motion</li><li>Selected / previous sync</li><li>Shift: second wavetable</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–06</span><span>FM+</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:16px"></i><i style="--h:40px"></i><i style="--h:61px"></i><i style="--h:33px"></i><i style="--h:12px"></i><i style="--h:46px"></i><i style="--h:57px"></i><i style="--h:25px"></i><i style="--h:19px"></i><i style="--h:51px"></i><i style="--h:54px"></i><i style="--h:29px"></i></div>
-          <h3>FM+ Static</h3><p>Two-block FM with ratios, fine tune, feedback, envelope depth, modulator level, and tone.</p>
+          <h3>FM+ Static</h3><p>Two-block FM with named ratios, separate feedback behavior, a combined operator envelope, modulator level, and harmonic tone shaping.</p>
           <ul><li>2 blocks</li><li>Feedback</li><li>Shift: third operator</li></ul>
         </article>
       </div>
@@ -1017,7 +1017,7 @@
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>
       </div>
-      <div class="warning"><b>Current fidelity boundary</b><span>VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
+      <div class="warning"><b>Current fidelity boundary</b><span>The documented machine topology, parameter routing, restart behavior, and filter octave tracking now have regression coverage. VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono remains a clean-room interpretation, not a firmware clone, and still awaits reference-hardware calibration.</span></div>
     </div>
   </section>
 
@@ -1059,7 +1059,7 @@
 <script>
   const MACHINES = [
     { name: 'SW SAW', desc: 'Stacked detuned saws with sub oscillators for wide basses, leads, and drones.', params: ['UNIL','UNIW','UNIX','SUBX','SUB1','SUB2','–','TUNE'] },
-    { name: 'SW PULS', desc: 'A unison pulse stack with animated pulse width for hollow basses and moving PWM textures.', params: ['UNIL','UNIW','UNIX','PW','PWAD','PWRS','–','TUNE'] },
+    { name: 'SW PULS', desc: 'A base pulse and unison pair with two sine subs and restartable pulse-width animation.', params: ['UNIL','UNIW','SUB1','SUB2','PW','PWAD','PWRS','TUNE'] },
     { name: 'SW ENS', desc: 'Four pitched oscillators with waveform, pulse width, and stereo chorus controls.', params: ['PCH2','PCH3','PCH4','WAVE','PW','CHRL','CHRW','TUNE'] },
     { name: 'SID6581', desc: 'Chip-style digital oscillator with selectable waveform and frequency modulation.', params: ['PW','PWAD','PWRS','WAVE','MOD','MSRC','MFRQ','TUNE'] },
     { name: 'DIGIPRO', desc: 'Factory-independent 12-bit wavetable synthesis with position modulation and sync.', params: ['WAVE','WP','WPM','WPRS','SYNC','SFRQ','–','TUNE'] },
@@ -1068,7 +1068,7 @@
   const PAGES = [
     { name: 'SYNTH', desc: 'The eight synthesis controls change with the selected machine.' },
     { name: 'AMP', desc: 'Shape the AHDR amplitude envelope, drive, level, pan, and portamento.', params: ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'] },
-    { name: 'FILTER', desc: 'Set the dual-cutoff resonant filter and its dedicated envelope.', params: ['BASE','WDTH','HPQ','LPQ','FATK','FDEC','FBA','FWD'] },
+    { name: 'FILTER', desc: 'BASE sets the high-pass edge; WDTH sets the octave gap to the low-pass edge. Eight steps equal one octave.', params: ['BASE','WDTH','HPQ','LPQ','FATK','FDEC','FBA','FWD'] },
     { name: 'EFFECT', desc: 'Tone and spatial tools: EQ, sample-rate reduction, and stereo filtered delay.', params: ['EQF','EQG','SRR','DSND','DTIM','DFB','DBAS','DWID'] },
     { name: 'LFO 1', desc: 'Assign LFO 1, then set trigger mode, shape, speed, depth, and phase.', params: ['DEST','TRIG','WAVE','MULT','SPD','INTL','DPTH','PHAS'] },
     { name: 'LFO 2', desc: 'A second independent assignable LFO with the same eight controls.', params: ['DEST','TRIG','WAVE','MULT','SPD','INTL','DPTH','PHAS'] },

@@ -50,6 +50,35 @@ their knob column. Trigger and Wave are five-position controls with named
 readouts: Free/Retrigger/Hold/One Shot/Half Shot and
 Sine/Saw/Triangle/Square/Random.
 
+## Voice modeling
+
+The current engine follows the documented control topology more closely while
+remaining a clean-room implementation:
+
+- SuperWave discontinuities use lightweight band-limiting. Saw contains its
+  base, close and extended unison pairs plus three documented sub types; Pulse
+  contains its base and close unison pair plus two sine subs. Pulse width
+  animation can restart on each note.
+- Ensemble supplies up to four chord voices, including Off and just-intonation
+  pitch choices, a saw-to-square-to-spike wave control, and independent chorus
+  level and width.
+- SID uses a quantized phase counter, pitch-clocked LFSR noise, pulse-width
+  animation, named waveform/modulation modes, and selected-frequency or
+  previous-track modulation sources.
+- DigiPRO keeps the original, factory-independent 32 x 512-sample, 12-bit
+  table design while making wave position, position modulation/restart, and
+  selected-frequency/previous-track sync behave as separate controls.
+- FM+ Static uses its displayed frequency-ratio choices, two feedback paths,
+  the combined operator envelope/volume behavior, and a Tone control that
+  opens additional harmonic content.
+- FILTER treats BASE as the high-pass edge and WDTH as the octave interval to
+  the low-pass edge. Eight parameter steps equal one octave, and new sounds
+  key-track by default.
+
+The Move and Remote UIs show the discrete machine choices as names, ratios,
+notes, or On/Off states instead of raw numbers. State v9 migrates older Pulse
+panels and their parameter locks to the corrected control layout.
+
 ## Live knob recording
 
 Press Move's **Record** button to arm Mono automation, start playback, and turn
@@ -145,9 +174,9 @@ probability, 1–8 retrigs, 1:2/2:2/1:4…4:4 conditions, and slide time.
 ## Clean-room scope
 
 Mono contains no Elektron firmware, factory wavetables, factory samples, or
-copied visual assets. The initial synthesis algorithms are original
-implementations guided by publicly documented behavior. Exact response-curve
-calibration against reference hardware is future work.
+copied visual assets. The synthesis algorithms are original implementations
+guided by publicly documented behavior and regression measurements. Exact
+response-curve calibration against reference hardware is future work.
 
 ## Current fidelity boundary
 

@@ -71,7 +71,7 @@ const COMMON = [
 ];
 const SYNTH = [
     ['UNIL','UNIW','UNIX','SUBX','SUB1','SUB2','-','TUNE'],
-    ['UNIL','UNIW','UNIX','PW','PWAD','PWRS','-','TUNE'],
+    ['UNIL','UNIW','SUB1','SUB2','PW','PWAD','PWRS','TUNE'],
     ['PCH2','PCH3','PCH4','WAVE','PW','CHRL','CHRW','TUNE'],
     ['PW','PWAD','PWRS','WAVE','MOD','MSRC','MFRQ','TUNE'],
     ['WAVE','WP','WPM','WPRS','SYNC','SFRQ','-','TUNE'],
@@ -312,6 +312,38 @@ function lfoModeIndex(value) {
     return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
 }
 function currentParamId(i) { return (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i; }
+const FM_RATIO_NAMES = ['1/64','1/32','1/16','3/32','1/8','3/16','1/4','5/16',
+    '3/8','7/16','1/2','5/8','3/4','7/8','1','1.25','1.5','1.75','2','2.5',
+    '3','3.5','4','5','6','7','8','9','10','12','16','24'];
+function bandIndex(value, count) { return Math.max(0, Math.min(count - 1, Math.floor(value * count / 128))); }
+function noteName(value) {
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    return `${names[value % 12]}${Math.floor(value / 12) - 1}`;
+}
+function machineParameterValue(i, value) {
+    if (shiftLayer() || page !== 0) return null;
+    if (machine === 1 && i === 6) return value < 64 ? 'OFF' : 'ON';
+    if (machine === 2 && i < 3) {
+        if (value < 4) return 'OFF';
+        if (value >= 112) return ['6/5','5/4','4/3','3/2'][Math.min(3, Math.floor((value - 112) / 4))];
+        return `${Math.round((value - 4) * 24 / 107)}ST`;
+    }
+    if (machine === 3) {
+        if (i === 2) return value < 64 ? 'OFF' : 'ON';
+        if (i === 3) return ['TRI','SAW','PULS','MIX','NOIS'][bandIndex(value, 5)];
+        if (i === 4) return ['OFF','RING','SYNC','R+S'][bandIndex(value, 4)];
+        if (i === 5) return value < 64 ? 'MFRQ' : 'PRCH';
+        if (i === 6) return noteName(value);
+    }
+    if (machine === 4) {
+        if (i === 0) return `W${String(bandIndex(value, 32)).padStart(2, '0')}`;
+        if (i === 3) return value < 64 ? 'OFF' : 'ON';
+        if (i === 4) return ['OFF','SFRQ','PRCH'][bandIndex(value, 3)];
+        if (i === 5) return noteName(value);
+    }
+    if (machine === 5 && (i === 0 || i === 4)) return FM_RATIO_NAMES[bandIndex(value, 32)];
+    return null;
+}
 function secondsFromParam(value, maxSeconds) {
     return value <= 0 ? 0 : 0.002 * Math.pow(maxSeconds / 0.002, value / 127);
 }
@@ -325,12 +357,14 @@ function shortHz(value) {
     return hz >= 1000 ? `${(hz / 1000).toFixed(hz < 10000 ? 1 : 0)}K` : `${Math.round(hz)}HZ`;
 }
 function parameterValue(i, value) {
+    const machineValue = machineParameterValue(i, value);
+    if (machineValue !== null) return machineValue;
     const pid = currentParamId(i);
     const times = {8:4, 9:4, 10:12, 11:8, 15:3, 20:4, 21:8,
         88:8, 89:4, 90:2, 96:8, 97:4, 98:2, 104:8, 105:4, 106:2};
     if (times[pid]) return shortTime(secondsFromParam(value, times[pid]));
     if (pid === 28) return shortTime(0.015 + 1.82 * value / 127);
-    if (pid === 16 || pid === 24) return shortHz(value);
+    if (pid === 24) return shortHz(value);
     if (pid === 7) { const cents = Math.round((value - 64) * 100 / 64); return `${cents >= 0 ? '+' : ''}${cents}C`; }
     if (pid === 14) { const pan = Math.round((value - 64) * 100 / 64); return pan === 0 ? 'CENTR' : `${pan < 0 ? 'L' : 'R'}${Math.abs(pan)}`; }
     if (pid === 25) { const gain = value - 64; return gain === 0 ? '0DB' : `${gain > 0 ? '+' : ''}${gain}DB`; }
