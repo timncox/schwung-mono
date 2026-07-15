@@ -52,10 +52,24 @@
       ]
     },
     {
+      "title": "Automation",
+      "lines": [
+        "Press Record, start",
+        "Move playback, then",
+        "turn Mono knobs.",
+        "",
+        "Values are captured",
+        "on clocked steps.",
+        "Continuous controls",
+        "glide smoothly."
+      ]
+    },
+    {
       "title": "Saving",
       "lines": [
         "Use Schwung User",
-        "Presets for sound.",
+        "Presets for sound",
+        "and automation.",
         "",
         "Move sequences live",
         "in the Move Set.",

@@ -61,6 +61,7 @@ typedef struct {
     mono_machine_t machine;
     uint8_t base[MONO_PARAMS];
     uint8_t effective[MONO_PARAMS];
+    float smoothed[MONO_PARAMS];
     mono_step_t steps[MONO_STEPS];
 
     int note;
@@ -103,6 +104,7 @@ struct mono {
     int step_page;
     int pattern_len;
     int transport;
+    int record_locks;
     int seq_step;
     int tick_in_step;
     int external_clock;
@@ -110,6 +112,7 @@ struct mono {
     double internal_frames;
     float bpm_override;
     float master;
+    float smooth_coeff;
     uint32_t revision;
     uint32_t note_events;
     uint32_t render_blocks;
@@ -135,6 +138,49 @@ static void changed(mono_t *m) {
 
 static int is_lfo_destination_param(int pid) {
     return pid >= 32 && pid < MONO_PRIMARY_PARAMS && ((pid - 32) % 8) == 0;
+}
+
+static int is_smoothable_param(const mono_track_t *t, int pid) {
+    /* Keep enumerated choices stepped so the glide never passes through an
+     * unintended waveform/routing mode. Everything else gets a short zipper-
+     * noise-free glide, including ordinary synth controls. */
+    if (pid < 8) {
+        if (t->machine == MONO_SID_6581 && (pid == 3 || pid == 4)) return 0;
+        if (t->machine == MONO_DIGIPRO_WAVE && (pid == 0 || pid == 4)) return 0;
+        if (t->machine == MONO_FM_STATIC && (pid == 0 || pid == 4)) return 0;
+        return 1;
+    }
+    if (pid < 32) return 1;
+    if (pid >= 32 && pid < MONO_PRIMARY_PARAMS) {
+        int offset = (pid - 32) % MONO_PAGE_PARAMS;
+        return offset == 4 || offset == 6 || offset == 7;
+    }
+    if (pid >= MONO_ALT_BASE && pid < MONO_PARAMS) {
+        int offset = pid - MONO_ALT_BASE;
+        if (t->machine == MONO_SWAVE_PULSE && offset == 3) return 0;
+        if (t->machine == MONO_DIGIPRO_WAVE && (offset == 0 || offset == 3)) return 0;
+        if (t->machine == MONO_FM_STATIC && offset == 2) return 0;
+        return 1;
+    }
+    return 0;
+}
+
+static void sync_smoothed(mono_track_t *t) {
+    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+        t->smoothed[pid] = (float)t->effective[pid];
+}
+
+static void reset_effective_to_base(mono_t *m) {
+    for (int track = 0; track < m->track_count; ++track)
+        memcpy(m->track[track].effective, m->track[track].base, MONO_PARAMS);
+}
+
+static void smooth_param_value(const mono_t *m, mono_track_t *t,
+                               uint8_t *rendered, int pid) {
+    float target = (float)t->effective[pid];
+    t->smoothed[pid] += (target - t->smoothed[pid]) * m->smooth_coeff;
+    if (fabsf(target - t->smoothed[pid]) < 0.001f) t->smoothed[pid] = target;
+    rendered[pid] = (uint8_t)iclamp((int)lrintf(t->smoothed[pid]), 0, 127);
 }
 
 static int lfo_destination_index(int value) {
@@ -285,6 +331,7 @@ static void machine_defaults(mono_track_t *t, mono_machine_t machine) {
     memcpy(t->base, defs[machine], 8);
     memcpy(t->base + MONO_ALT_BASE, alt_defs[machine], MONO_ALT_PARAMS);
     memcpy(t->effective, t->base, MONO_PARAMS);
+    sync_smoothed(t);
 }
 
 static void init_track(mono_track_t *t, int index, int delay_frames) {
@@ -310,6 +357,7 @@ mono_t *mono_create(const host_api_v1_t *host, int track_count) {
     m->pattern_len = 16;
     m->seq_step = -1;
     m->master = m->track_count > 1 ? 0.34f : 0.7f;
+    m->smooth_coeff = 1.0f - expf(-1.0f / (0.030f * m->sample_rate));
     generate_wavetables(m);
     int delay_frames = m->sample_rate * MONO_DELAY_SECONDS;
     for (int i = 0; i < m->track_count; ++i) {
@@ -472,7 +520,9 @@ static void track_trigger(mono_t *m, mono_track_t *t, int note,
 void mono_note_on(mono_t *m, int track, int note, int velocity) {
     if (!m || track < 0 || track >= m->track_count) return;
     mono_track_t *t = &m->track[track];
-    memcpy(t->effective, t->base, MONO_PARAMS);
+    /* While clocked, keep the current automation targets under incoming Move
+     * notes. Stopped performance notes still start from the base patch. */
+    if (!m->transport) memcpy(t->effective, t->base, MONO_PARAMS);
     track_trigger(m, t, iclamp(note, 0, 127), velocity, 15, 0);
     ++m->note_events;
     changed(m);
@@ -740,12 +790,17 @@ static float svf(mono_svf_t *s, float in, float hz, float resonance,
 
 static float render_track(mono_t *m, mono_track_t *t, float *right) {
     float bpm = bpm_now(m);
+    uint8_t targets[MONO_PARAMS];
     uint8_t unmodulated[MONO_PARAMS];
     uint8_t modulated[MONO_PARAMS];
     float next_lfo_mod[3 * MONO_PAGE_PARAMS] = {0};
     int target_pid[3] = {-1, -1, -1};
     float target_delta[3] = {0};
-    memcpy(unmodulated, t->effective, sizeof(unmodulated));
+    memcpy(targets, t->effective, sizeof(targets));
+    memcpy(unmodulated, targets, sizeof(unmodulated));
+    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+        if (is_smoothable_param(t, pid))
+            smooth_param_value(m, t, unmodulated, pid);
     memcpy(modulated, unmodulated, sizeof(modulated));
 
     /* LFO controls receive the previous sample's modulation while the current
@@ -879,7 +934,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right) {
     if (++t->delay_pos >= delay_frames) t->delay_pos = 0;
     left += dl * send;
     *right += dr * send;
-    memcpy(t->effective, unmodulated, sizeof(unmodulated));
+    memcpy(t->effective, targets, sizeof(targets));
     return left;
 }
 
@@ -970,7 +1025,11 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
         return;
     }
     if (st == 0xFB) { m->transport = 1; return; }
-    if (st == 0xFC) { m->transport = 0; return; }
+    if (st == 0xFC) {
+        m->transport = 0;
+        reset_effective_to_base(m);
+        return;
+    }
     if (len < 3) return;
     int kind = st & 0xF0;
     int channel = st & 0x0F;
@@ -1096,6 +1155,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                     machine_defaults(t, (mono_machine_t)machine64);
                     memcpy(t->base, params, (size_t)saved_params);
                     memcpy(t->effective, t->base, MONO_PARAMS);
+                    sync_smoothed(t);
                 }
             }
             continue;
@@ -1177,6 +1237,7 @@ static void restore_state(mono_t *m, const char *json) {
     m->bpm_override = fclamp(json_float(json, "\"bpm_override\":", 0.0f),
                              0.0f, 400.0f);
     m->transport = 0;
+    m->record_locks = 0;
     m->seq_step = -1;
     m->tick_in_step = 0;
     m->external_clock = 0;
@@ -1225,6 +1286,7 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!strcmp(key, "pattern_len")) { m->pattern_len = iclamp(v, 1, MONO_STEPS); changed(m); return; }
     if (!strcmp(key, "bpm_override")) { m->bpm_override = fclamp(strtof(val, NULL), 0, 400); changed(m); return; }
     if (!strcmp(key, "master")) { m->master = fclamp(strtof(val, NULL) / 100.0f, 0, 2); changed(m); return; }
+    if (!strcmp(key, "record")) { m->record_locks = v != 0; changed(m); return; }
     if (!strcmp(key, "transport")) {
         if (v && !m->transport) {
             m->seq_step = -1;
@@ -1232,7 +1294,11 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
             mono_advance_step(m);
         }
         m->transport = v != 0;
-        if (!m->transport) { m->external_clock = 0; m->external_clock_age = 0; }
+        if (!m->transport) {
+            m->external_clock = 0;
+            m->external_clock_age = 0;
+            reset_effective_to_base(m);
+        }
         changed(m);
         return;
     }
@@ -1243,6 +1309,11 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
         t->base[pid] = (uint8_t)iclamp(v, 0, max);
         t->effective[pid] = t->base[pid];
+        if (m->record_locks && m->transport && m->seq_step >= 0) {
+            mono_step_t *step = &t->steps[m->seq_step];
+            step->lock_mask |= UINT64_C(1) << pid;
+            step->lock_values[pid] = t->base[pid];
+        }
         changed(m);
         return;
     }
@@ -1294,6 +1365,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "step_page")) return snprintf(buf, (size_t)buf_len, "%d", m->step_page);
     if (!strcmp(key, "pattern_len")) return snprintf(buf, (size_t)buf_len, "%d", m->pattern_len);
     if (!strcmp(key, "transport")) return snprintf(buf, (size_t)buf_len, "%d", m->transport);
+    if (!strcmp(key, "record")) return snprintf(buf, (size_t)buf_len, "%d", m->record_locks);
     if (!strcmp(key, "play_step")) return snprintf(buf, (size_t)buf_len, "%d", m->seq_step);
     if (!strcmp(key, "bpm")) return snprintf(buf, (size_t)buf_len, "%.1f", bpm_now(m));
     if (!strcmp(key, "bpm_override")) return snprintf(buf, (size_t)buf_len, "%.1f", m->bpm_override);
@@ -1317,15 +1389,16 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         return n;
     }
     if (!strcmp(key, "status"))
-        return snprintf(buf, (size_t)buf_len, "%d:%d:%.1f:%d:%d:%d:%d",
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%.1f:%d:%d:%d:%d:%d",
                         m->transport, m->seq_step, bpm_now(m), m->selected_track,
-                        m->selected_page, t->machine, m->pattern_len);
+                        m->selected_page, t->machine, m->pattern_len, m->record_locks);
     if (!strcmp(key, "rui_poll"))
-        return snprintf(buf, (size_t)buf_len, "%u:%d:%d:%.0f",
-                        m->revision, m->transport, m->seq_step, bpm_now(m));
+        return snprintf(buf, (size_t)buf_len, "%u:%d:%d:%.0f:%d",
+                        m->revision, m->transport, m->seq_step, bpm_now(m),
+                        m->record_locks);
     if (!strcmp(key, "rui_play"))
-        return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f",
-                        m->transport, m->seq_step, bpm_now(m));
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f:%d",
+                        m->transport, m->seq_step, bpm_now(m), m->record_locks);
     if (!strcmp(key, "debug"))
         return snprintf(buf, (size_t)buf_len,
                         "%u:%d:%d:%u:%u:%u:%d:%d:%d:%d:%d:%d:%d",
@@ -1354,6 +1427,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
                      "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
                      "\"alt5\":%d,\"alt6\":%d,\"alt7\":%d,\"alt8\":%d,"
+                     "\"record\":%d,"
                      "\"debug\":\"%u:%d:%d\","
                      "\"steps\":\"%s\",\"data\":\"",
                      m->selected_track, m->selected_page, m->step_page,
@@ -1367,6 +1441,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      t->base[MONO_ALT_BASE + 2], t->base[MONO_ALT_BASE + 3],
                      t->base[MONO_ALT_BASE + 4], t->base[MONO_ALT_BASE + 5],
                      t->base[MONO_ALT_BASE + 6], t->base[MONO_ALT_BASE + 7],
+                     m->record_locks,
                      m->note_events, m->render_peak, m->lifetime_peak,
                      step_csv)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
@@ -1392,4 +1467,16 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         return n;
     }
     return -1;
+}
+
+int mono_debug_effective_param(mono_t *m, int track, int pid) {
+    if (!m || track < 0 || track >= m->track_count || pid < 0 || pid >= MONO_PARAMS)
+        return -1;
+    return m->track[track].effective[pid];
+}
+
+float mono_debug_smoothed_param(mono_t *m, int track, int pid) {
+    if (!m || track < 0 || track >= m->track_count || pid < 0 || pid >= MONO_PARAMS)
+        return -1.0f;
+    return m->track[track].smoothed[pid];
 }

@@ -274,6 +274,57 @@ static void test_sequencer_and_lock(void) {
     mono_destroy(m);
 }
 
+static void test_live_parameter_recording_and_smoothing(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "page", "2");
+    mono_set_param(m, "p1", "20");
+    (void)render_energy(m, 200);
+    assert(fabsf(mono_debug_smoothed_param(m, 0, 16) - 20.0f) < 0.1f);
+
+    mono_set_param(m, "record", "1");
+    mono_set_param(m, "transport", "1");
+    assert(get_int(m, "record") == 1);
+    assert(get_int(m, "play_step") == 0);
+    mono_set_param(m, "p1", "100");
+    assert(mono_debug_effective_param(m, 0, 16) == 100);
+    char steps[128];
+    get_string(m, "steps", steps, sizeof(steps));
+    assert(!strncmp(steps, "2,", 2));
+
+    (void)render_energy(m, 1);
+    float moving = mono_debug_smoothed_param(m, 0, 16);
+    assert(moving > 20.0f && moving < 100.0f);
+    (void)render_energy(m, 200);
+    assert(fabsf(mono_debug_smoothed_param(m, 0, 16) - 100.0f) < 0.1f);
+
+    /* Incoming Move notes must not erase the current automation target. */
+    uint8_t note_on[3] = {0x90, 60, 112};
+    mono_on_midi(m, note_on, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(mono_debug_effective_param(m, 0, 16) == 100);
+
+    mono_set_param(m, "record", "0");
+    mono_set_param(m, "p1", "20");
+    mono_set_param(m, "transport", "0");
+    assert(mono_debug_effective_param(m, 0, 16) == 20);
+    (void)render_energy(m, 200);
+    assert(fabsf(mono_debug_smoothed_param(m, 0, 16) - 20.0f) < 0.1f);
+
+    mono_set_param(m, "transport", "1");
+    assert(mono_debug_effective_param(m, 0, 16) == 100);
+    (void)render_energy(m, 1);
+    moving = mono_debug_smoothed_param(m, 0, 16);
+    assert(moving > 20.0f && moving < 100.0f);
+
+    /* The arm switch is a performance state, never recalled with a patch. */
+    char state[4096];
+    assert(mono_get_param(m, "state", state, sizeof(state)) > 0);
+    mono_set_param(m, "record", "1");
+    mono_set_param(m, "state", state);
+    assert(get_int(m, "record") == 0);
+    mono_destroy(m);
+}
+
 static void test_internal_clock(void) {
     mono_t *m = mono_create(&host, 1);
     assert(m);
@@ -551,6 +602,7 @@ int main(void) {
     test_lfo_can_modulate_lfo_settings();
     test_shift_layer_controls_are_audible();
     test_sequencer_and_lock();
+    test_live_parameter_recording_and_smoothing();
     test_internal_clock();
     test_clock_loss_falls_back();
     test_six_tracks_render_together();

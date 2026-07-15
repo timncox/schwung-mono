@@ -1,7 +1,7 @@
 /* Mono — six-track machine synth and lock sequencer, full-surface UI. */
 import * as os from 'os';
 import {
-    MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight,
+    MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight, MoveRec,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
@@ -78,6 +78,7 @@ const PRESET_DIR = '/data/UserData/schwung/presets/mono';
 const SAVE_ROW = '[Save current...]';
 
 let track = 0, page = 0, stepPage = 0, machine = 0, transport = 0;
+let recordArmed = false;
 let patternLen = 16, playStep = -1, shift = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
@@ -227,6 +228,7 @@ function fetchAll() {
     transport = parseInt(p[0], 10) || 0;
     playStep = parseInt(p[1], 10);
     patternLen = parseInt(p[6], 10) || 16;
+    recordArmed = parseInt(p[7] || gp('record') || '0', 10) !== 0;
     machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
@@ -299,6 +301,13 @@ function toggleTransport() {
     paintGlobals(false); needsRedraw = true;
 }
 
+function toggleRecord() {
+    recordArmed = !recordArmed;
+    host_module_set_param('record', recordArmed ? '1' : '0');
+    announce(recordArmed ? 'Automation recording armed' : 'Automation recording off');
+    paintGlobals(false); needsRedraw = true;
+}
+
 function paintTracks(force) {
     for (let i = 0; i < 6; i++)
         setLED(TRACK_PADS[i], i === track ? MACHINE_COLORS[machine] : 0x10, force);
@@ -307,6 +316,7 @@ function paintTracks(force) {
 function paintGlobals(force) {
     setLED(PAD_MACHINE, MACHINE_COLORS[machine], force);
     setLED(PAD_TRANSPORT, transport ? Green : LightGrey, force);
+    setLED(MoveRec, recordArmed ? BrightRed : Black, force);
 }
 
 function paintSteps(force) {
@@ -324,7 +334,8 @@ function paintAll(force) { paintTracks(force); paintGlobals(force); paintSteps(f
 
 function draw() {
     clear_screen();
-    drawHeader(`MONO · T${track + 1} ${MACHINES[machine]}`);
+    drawHeader(recordArmed ? `REC · T${track + 1} ${MACHINES[machine]}`
+                           : `MONO · T${track + 1} ${MACHINES[machine]}`);
     const n = names();
     const shown = activeValues();
     const first = focusBank * 4;
@@ -374,10 +385,10 @@ globalThis.tick = function() {
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (!ready) ready = fetchAll();
     if (ready && !heldStep && tickCount % 6 === 0) {
-        const oldPlay = playStep, oldTransport = transport;
+        const oldPlay = playStep, oldTransport = transport, oldRecord = recordArmed;
         fetchAll();
         if (oldPlay !== playStep) paintSteps(false);
-        if (oldTransport !== transport) paintGlobals(false);
+        if (oldTransport !== transport || oldRecord !== recordArmed) paintGlobals(false);
         needsRedraw = true;
     }
     if (resumePaints > 0 && tickCount % 8 === 0) { paintAll(true); resumePaints--; }
@@ -410,6 +421,7 @@ globalThis.onMidiMessageInternal = function(data) {
             openPresetBrowser();
             return;
         }
+        if (d1 === MoveRec && d2 > 0) { toggleRecord(); return; }
         if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setPage(page + d); return; }
         if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
         if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }

@@ -75,6 +75,15 @@ and then apply that step's locks. MIDI clock advances at six ticks per 16th;
 the engine falls back to `host->get_bpm()` when its own transport is running
 without clock.
 
+The `record` performance parameter arms live lock capture: while transport is
+running, page and Shift-layer edits write the selected track's current step as
+well as its base value. In `mono-voice`, incoming Move clock drives the same
+16-step lane while native Move notes remain authoritative. Recorded locks are
+serialized with the normal module state, but the record-arm switch itself is
+cleared on recall. Render-time smoothing applies a 30 ms one-pole glide to
+continuous targets. Waveform/routing/mode enums stay stepped, and smoothing
+uses separate targets so LFO cross-modulation never mutates saved parameters.
+
 ## Fidelity boundary
 
 The public manual documents topology and control intent but not the original

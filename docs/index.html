@@ -891,6 +891,7 @@
         <div class="led-item"><i class="led-dot" style="--c:#fffef2"></i>White · playhead</div>
         <div class="led-item"><i class="led-dot" style="--c:#74ff77"></i>Green · held</div>
       </div>
+      <div class="warning"><b>Live automation</b><span>Press Move's <kbd>Record</kbd> button, start playback, then turn Mono controls. Full Mono writes the selected track's current step; Mono Voice follows Move's clock while Move keeps recording the notes. Continuous values glide over about 30 ms, while waveform, LFO routing, trigger, and wave choices stay stepped.</span></div>
     </div>
   </section>
 
@@ -899,8 +900,8 @@
       <div class="section-head"><div class="index">04 / Save</div><h2 class="section-title">Keep the sound. Keep the sequence.</h2></div>
       <p class="lede">Choose the save that matches where the sequence lives. Mono presets and Move Sets preserve different layers of the instrument.</p>
       <div class="lock-workflow">
-        <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine and every sound parameter.</p></div>
-        <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips as well as the track state.</p></div>
+        <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine, every sound parameter, and Mono's live automation locks.</p></div>
+        <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips, track state, and Mono Voice automation.</p></div>
         <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, and parameter locks return.</p></div>
       </div>
     </div>
@@ -996,6 +997,7 @@
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>On SYNTH, edit the selected machine's secondary eight-control layer.</span></div>
+          <div class="ref-row"><b>Record</b><span>Arm live parameter-lock capture. Start the internal sequencer and turn knobs; continuous values glide between recorded steps.</span></div>
         </div>
         <div class="ref-panel">
           <h3>Mono Voice / normal track</h3>
@@ -1006,6 +1008,7 @@
           <div class="ref-row"><b>Shift + jog</b><span>Change synthesis machine.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls for the current machine.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page; the display follows knobs 1–4 or 5–8 as you touch them.</span></div>
+          <div class="ref-row"><b>Record</b><span>Arm Mono automation while Move plays or records. Notes remain in the Move clip; clocked knob locks live in Mono Voice.</span></div>
           <div class="ref-row"><b>Track effects</b><span>Mono Voice still sits inside a normal Move track and its surrounding workflow.</span></div>
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>

@@ -37,5 +37,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len);
 void mono_note_on(mono_t *m, int track, int note, int velocity);
 void mono_note_off(mono_t *m, int track, int note);
 void mono_advance_step(mono_t *m);
+int mono_debug_effective_param(mono_t *m, int track, int pid);
+float mono_debug_smoothed_param(mono_t *m, int track, int pid);
 
 #endif

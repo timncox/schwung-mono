@@ -42,11 +42,24 @@ their knob column. Trigger and Wave are five-position controls with named
 readouts: Free/Retrigger/Hold/One Shot/Half Shot and
 Sine/Saw/Triangle/Square/Random.
 
+## Live knob recording
+
+Press Move's **Record** button to arm Mono automation, start playback, and turn
+any Mono knob. Mono writes the current value into the active 16th-note step;
+turning more than one knob records each parameter independently. In Mono Voice,
+Move continues to own the notes while the voice stores a clock-synced 16-step
+parameter-lock lane. Full-surface Mono records into its selected track and
+internal pattern.
+
+Continuous controls glide to each captured value over about 30 ms to avoid
+zipper noise. Enumerated choices such as waveform, LFO destination, trigger,
+and wave remain stepped so automation never passes through an unintended mode.
+
 ## Saving and recall
 
 - **Mono Voice sound preset:** in Schwung's Chain Editor, highlight the synth
   block, hold Shift and click the jog wheel, open **User Presets**, then choose
-  **Save current**.
+  **Save current**. The voice's live automation locks are part of this preset.
 - **Mono Voice sound plus Move sequence:** save the Move Set. Move's native
   clips belong to the Set, not to a component preset. Open Set Overview with
   Shift + Step 1; Move saves Sets automatically.
@@ -86,6 +99,7 @@ scripts/deploy.sh
 - Shift + knobs 1-8 on SYNTH: edit the secondary machine layer
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
+- Move Record: arm/disarm live knob-lock recording during playback
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's

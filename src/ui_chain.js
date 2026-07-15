@@ -1,6 +1,6 @@
 /* Mono Voice — compact seven-page editor for a normal Move synth slot. */
 import {
-    MoveKnob1, MoveShift, MoveMainKnob, MoveLeft, MoveRight
+    MoveKnob1, MoveShift, MoveMainKnob, MoveLeft, MoveRight, MoveRec
 } from '/data/UserData/schwung/shared/constants.mjs';
 import { decodeDelta } from '/data/UserData/schwung/shared/input_filter.mjs';
 import { drawMenuHeader as drawHeader, drawMenuFooter as drawFooter }
@@ -65,6 +65,7 @@ const SYNTH_SHIFT = [
 ];
 
 let page = 0, machine = 0, shift = false, shiftVisual = false;
+let recordArmed = false, tickCount = 0;
 let values = new Array(8).fill(0);
 let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
@@ -109,10 +110,18 @@ function fetchAll() {
     const mv = gp('machine');
     if (mv === null) return false;
     machine = Math.max(0, Math.min(MACHINES.length - 1, parseInt(mv, 10) || 0));
+    recordArmed = parseInt(gp('record') || '0', 10) !== 0;
     host_module_set_param('page', `${page}`);
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
     return true;
+}
+
+function toggleRecord() {
+    recordArmed = !recordArmed;
+    host_module_set_param('record', recordArmed ? '1' : '0');
+    announce(recordArmed ? 'Automation recording armed' : 'Automation recording off');
+    needsRedraw = true;
 }
 
 function setPage(next) {
@@ -153,7 +162,8 @@ function adjust(i, delta) {
 
 function draw() {
     clear_screen();
-    drawHeader(`MONO V · ${MACHINES[machine]}`);
+    drawHeader(recordArmed ? `REC · ${MACHINES[machine]}`
+                           : `MONO V · ${MACHINES[machine]}`);
     const n = names();
     const shown = activeValues();
     const first = focusBank * 4;
@@ -164,7 +174,8 @@ function draw() {
         print(x, 34, displayValue(i, shown[i]), 1);
     }
     drawFooter({left: `${shiftLayer() ? 'SHIFT SYN' : PAGES[page]} K${first + 1}-${first + 4}`,
-                right: shiftActive() ? 'jog=machine' : 'jog=page'});
+                right: recordArmed ? 'REC: turn knobs'
+                    : (shiftActive() ? 'jog=machine' : 'jog=page')});
     needsRedraw = false;
 }
 
@@ -177,7 +188,15 @@ globalThis.init = function() {
 globalThis.onResume = function() { ready = fetchAll(); needsRedraw = true; };
 
 globalThis.tick = function() {
+    tickCount++;
     if (!ready) ready = fetchAll();
+    if (ready && tickCount % 6 === 0) {
+        const nextRecord = parseInt(gp('record') || '0', 10) !== 0;
+        if (nextRecord !== recordArmed) {
+            recordArmed = nextRecord;
+            needsRedraw = true;
+        }
+    }
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (needsRedraw) draw();
@@ -187,6 +206,7 @@ globalThis.onMidiMessageInternal = function(data) {
     if ((data[0] & 0xF0) !== 0xB0) return;
     const cc = data[1], val = data[2];
     if (cc === MoveShift) { shift = val > 0; needsRedraw = true; return; }
+    if (cc === MoveRec && val > 0) { toggleRecord(); return; }
     if (cc === MoveMainKnob) {
         const d = decodeDelta(val);
         if (d) shiftActive() ? setMachine(machine + d) : setPage(page + d);

@@ -103,6 +103,10 @@
     <section class="section"><div class="control-grid" id="controls"></div>
       <div class="master"><span>MASTER</span><input id="master" type="range" min="0" max="200" value="100"><output id="masterValue">100</output></div>
     </section>
+    <section class="section"><div class="legend">LIVE AUTOMATION</div>
+      <div class="tabs"><button id="record">ARM RECORDING</button></div>
+      <div class="hint">Arm, start Move or Mono playback, then turn controls. Continuous parameters glide between captured step values; choices stay stepped.</div>
+    </section>
     <section class="section lower">
       <div class="sequencer" id="sequencer">
         <div class="seqbar"><button id="play" class="green">PLAY</button><button id="pageDown">◀ 16</button><button id="pageUp">16 ▶</button>
@@ -242,6 +246,7 @@ window.addEventListener("keydown",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase
 window.addEventListener("keyup",e=>{const i=KEYBOARD.indexOf(e.key.toLowerCase()); if(i>=0)noteOff(KEY_NOTES[i],el("keys").children[i]);});
 window.addEventListener("blur",()=>{[...held].forEach(n=>noteOff(n,el("keys").children[KEY_NOTES.indexOf(n)],true));});
 el("play").onclick=()=>{send("transport",number("transport")?0:1); render();};
+el("record").onclick=()=>{send("record",number("record")?0:1); render();};
 function changeStepPage(delta){send("step_page",(number("step_page")+delta+4)%4); render();}
 el("pageDown").onclick=()=>changeStepPage(-1); el("pageUp").onclick=()=>changeStepPage(1);
 el("master").oninput=()=>{touched.master=Date.now(); el("masterValue").value=el("master").value; send("master",el("master").value);};
@@ -275,9 +280,10 @@ function render() {
   const steps=String(M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===stepPage*16+i);b.textContent=String(stepPage*16+i+1).padStart(2,"0");});
   el("play").classList.toggle("active",!!number("transport")); el("play").textContent=number("transport")?"STOP":"PLAY";
+  el("record").classList.toggle("active",!!number("record")); el("record").textContent=number("record")?"RECORDING ARMED":"ARM RECORDING";
   el("stepRange").textContent=`STEPS ${String(stepPage*16+1).padStart(2,"0")}–${String(stepPage*16+16).padStart(2,"0")}`;
   el("screen").textContent=voice?`${MACHINES[machine]} · VOICE`:`T${track+1} · ${MACHINES[machine]}`;
-  el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / ${number("pattern_len",16)} STEPS`;
+  el("screenPage").textContent=`${PAGES[page]}${page===0&&altLayer?" SHIFT":""} / ${number("pattern_len",16)} STEPS${number("record")?" / REC":""}`;
   el("screenTempo").textContent=`${Number(number("bpm",120)).toFixed(1)} BPM`;
   const debug=String(M.debug||"0:0:0").split(":"),events=Number(debug[0]||0),peak=Number(debug[2]||debug[1]||0);
   el("debug").textContent=`EVENTS ${events} / PEAK ${peak}`;
@@ -285,7 +291,7 @@ function render() {
   lastEventCount=events;
 }
 schwungRemote.onParamChange(params=>{
-  for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix)continue;if(!PREFIX)PREFIX=prefix;if(prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];}else if(name==="state"){try{Object.assign(M,JSON.parse(String(params[key])));}catch(e){M.state=params[key];}}else M[name]=params[key];}
+  for(const key in params){let prefix=null;if(key.startsWith("overtake_dsp:"))prefix="overtake_dsp:";else if(key.startsWith("synth:"))prefix="synth:";if(!prefix)continue;if(!PREFIX)PREFIX=prefix;if(prefix!==PREFIX)continue;const name=key.slice(prefix.length);if(name==="rui_play"){const p=String(params[key]).split(":");M.transport=p[0];M.play_step=p[1];M.bpm=p[2];M.record=p[3];}else if(name==="state"){try{Object.assign(M,JSON.parse(String(params[key])));}catch(e){M.state=params[key];}}else M[name]=params[key];}
   render();
 });
 </script>
