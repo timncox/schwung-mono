@@ -67,17 +67,17 @@
     {
       "title": "Arpeggiator",
       "lines": [
-        "Shift + Record:",
-        "arp on or off.",
-        "Shift + Left:",
-        "latch on or off.",
-        "Shift + Right:",
-        "clear latched notes.",
+        "Jog past LFO 3 to",
+        "open the ARP page.",
+        "Knob 1: arp on/off.",
+        "Knob 2: latch.",
+        "Knobs 3-8 shape it.",
         "",
-        "Use Remote UI for",
-        "mode, rate, octaves,",
-        "gate, velocity and",
-        "16 pitch offsets."
+        "ARP STEP uses knobs",
+        "for offsets 1-8.",
+        "Hold Shift for 9-16.",
+        "Turn latch off to",
+        "release latched notes."
       ]
     },
     {

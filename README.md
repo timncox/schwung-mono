@@ -83,8 +83,9 @@ panels and their parameter locks to the corrected control layout.
 
 - **Arp Designer:** per-track On/Latch, Up/Down/Pendulum/Random/Played/Converge
   modes, eight clock divisions, one to four octaves, gate, fixed-or-played
-  velocity, and a 16-step ±24-semitone offset lane. Mono Voice shortcuts are
-  Shift + Record (arp), Shift + Left (latch), and Shift + Right (clear).
+  velocity, and a 16-step ±24-semitone offset lane. In Mono Voice, jog past
+  LFO 3 to reach ARP, then ARP STEP; knobs edit offsets 1–8 and Shift + knobs
+  edit offsets 9–16. Turning Latch off releases the latched chord.
 - **Patch Lab:** 12 original starting sounds, Init, bounded randomization, and
   two complete same-machine parameter snapshots that morph across all 112
   controls. Discrete choices switch cleanly at the midpoint.

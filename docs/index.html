@@ -832,12 +832,12 @@
         <div class="mode-summary">
           <h3>A machine inside Move.</h3>
           <p>Mono Voice behaves like a normal Move sound generator: Move owns the track, clips, pads, and sequencing while Mono supplies the synthesis engine.</p>
-          <span class="chip">1 voice</span><span class="chip">Move clips</span><span class="chip">7 pages</span><span class="chip">6 machines</span>
+          <span class="chip">1 voice</span><span class="chip">Move clips</span><span class="chip">9 pages</span><span class="chip">6 machines</span>
         </div>
         <div class="start-list">
           <div class="start-step"><div><b>Add Mono Voice</b><span>Load <code>mono-voice</code> into a normal Move track.</span></div></div>
           <div class="start-step"><div><b>Play normally</b><span>Use Move's pads and sequencer exactly as you would with another sound generator.</span></div></div>
-          <div class="start-step"><div><b>Pick a page</b><span>Turn the jog wheel, or use the left and right arrows, to move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div></div>
+          <div class="start-step"><div><b>Pick a page</b><span>Turn the jog wheel, or use the left and right arrows, to move through SYNTH, AMP, FILTER, EFFECT, LFO 1–3, ARP, and ARP STEP.</span></div></div>
           <div class="start-step"><div><b>Pick a machine or deeper control</b><span>Hold <kbd>Shift</kbd> and turn the jog wheel to change machine. Hold <kbd>Shift</kbd> while turning knobs 1–8 on any page to edit its secondary bank.</span></div></div>
         </div>
       </div>
@@ -914,7 +914,7 @@
       <div class="section-head"><div class="index">05 / Perform</div><h2 class="section-title">Build motion into the sound.</h2></div>
       <p class="lede">Hold <kbd>Shift</kbd> and press top pad 8 in full Mono, then turn the jog to move between Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode. The Remote UI puts the complete system on one screen.</p>
       <div class="lock-workflow">
-        <div class="lock-card"><span class="big-num">ARP</span><h3>Latch a chord.</h3><p>Choose one of six orders, eight clock rates, one to four octaves, gate, velocity, and a 16-step pitch-offset lane. Tap a Step key to select an arp position; knob 8 edits its ±24-semitone offset. In Mono Voice use <kbd>Shift</kbd> + <kbd>Record</kbd> for arp, <kbd>Shift</kbd> + <kbd>Left</kbd> for latch, and <kbd>Shift</kbd> + <kbd>Right</kbd> to clear.</p></div>
+        <div class="lock-card"><span class="big-num">ARP</span><h3>Latch a chord.</h3><p>Choose one of six orders, eight clock rates, one to four octaves, gate, velocity, and a 16-step pitch-offset lane. Tap a Step key to select an arp position; knob 8 edits its ±24-semitone offset. In Mono Voice, jog past LFO 3 to ARP: knob 1 enables the arp and knob 2 enables latch. The next page, ARP STEP, uses knobs for offsets 1–8 and <kbd>Shift</kbd> + knobs for 9–16. Turn latch off to release its notes.</p></div>
         <div class="lock-card"><span class="big-num">STEP</span><h3>Move off the grid.</h3><p>Step Detail adds ±23/48-step microtiming, ties, and accents beside the existing probability, condition, retrig, and slide controls. Negative timing anticipates the grid; positive timing delays the trig.</p></div>
         <div class="lock-card"><span class="big-num">SONG</span><h3>Chain windows.</h3><p>Sixteen rows each choose a start, length, repeat count, and ±24-semitone transpose. A row can reuse any section of the same 64 stored steps, so variations do not require duplicate patterns.</p></div>
       </div>
@@ -1025,13 +1025,14 @@
           <h3>Mono Voice / normal track</h3>
           <div class="ref-row"><b>Move pads</b><span>Play the voice using Move's normal pad layout.</span></div>
           <div class="ref-row"><b>Move sequencer</b><span>Record and edit notes using Move's native clips and steps.</span></div>
-          <div class="ref-row"><b>Jog wheel</b><span>Move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div>
+          <div class="ref-row"><b>Jog wheel</b><span>Move through SYNTH, AMP, FILTER, EFFECT, LFO 1–3, ARP, and ARP STEP.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Previous or next parameter page.</span></div>
           <div class="ref-row"><b>Shift + jog</b><span>Change synthesis machine.</span></div>
-          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls for the current page.</span></div>
+          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls on sound pages. On ARP STEP they edit pitch offsets 9–16.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page; the display follows knobs 1–4 or 5–8 as you touch them.</span></div>
           <div class="ref-row"><b>Record</b><span>Arm Mono automation while Move plays or records. Notes remain in the Move clip; clocked knob locks live in Mono Voice.</span></div>
-          <div class="ref-row"><b>Shift + Record</b><span>Toggle Mono's arpeggiator. Shift + Left toggles latch; Shift + Right clears the latched chord. Use Remote UI for the full arp design.</span></div>
+          <div class="ref-row"><b>ARP page</b><span>Knob 1 toggles the arp; knob 2 toggles latch; knobs 3–8 set mode, rate, octaves, gate, length, and velocity. Turn latch off to release its chord.</span></div>
+          <div class="ref-row"><b>ARP STEP</b><span>Knobs edit pitch offsets 1–8; hold Shift while turning them to edit offsets 9–16.</span></div>
           <div class="ref-row"><b>Track effects</b><span>Mono Voice still sits inside a normal Move track and its surrounding workflow.</span></div>
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>
@@ -1226,8 +1227,8 @@
   const inspectExtras = {
     jog: ['NAVIGATION', 'JOG', 'PARAMETER PAGE', 'Turn the jog wheel to cycle through SYNTH, AMP, FILTER, EFFECT, LFO 1, LFO 2, and LFO 3.'],
     arrows: ['SEQUENCER', '← / →', 'STEP PAGE', 'Select one of four 16-step pages: 1–16, 17–32, 33–48, or 49–64.'],
-    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On every sound page, Shift plus knobs edits eight additional controls. Shift plus jog changes machine. Shift plus top-row pad 8 opens Setup. In Mono Voice, Shift plus Record toggles arp, Shift plus Left toggles latch, and Shift plus Right clears notes.'],
-    voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages; Shift plus jog changes the machine.']
+    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On every sound page, Shift plus knobs edits eight additional controls. On Mono Voice ARP STEP, Shift plus knobs selects offsets 9 through 16. Shift plus jog changes machine. Shift plus top-row pad 8 opens Setup.'],
+    voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages, including ARP and ARP STEP; Shift plus jog changes the machine.']
   };
   document.querySelectorAll('[data-inspect]').forEach(button => button.addEventListener('click', () => inspect(...inspectExtras[button.dataset.inspect])));
 
