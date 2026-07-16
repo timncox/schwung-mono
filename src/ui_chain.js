@@ -265,9 +265,12 @@ function draw() {
         print(x, 18, n[i], 1);
         print(x, 34, displayValue(i, shown[i]), 1);
     }
-    drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
-                right: recordArmed ? 'REC: turn knobs'
-                    : (shiftActive() ? 'Rec=arp · ←latch · →clear' : 'jog=page')});
+    const footer = shiftActive()
+        ? {left: `SH K${first + 1}-${first + 4}`,
+           right: recordArmed ? 'REC KNOBS' : 'R:ARP ←L →C'}
+        : {left: `${PAGES[page]} K${first + 1}-${first + 4}`,
+           right: recordArmed ? 'REC KNOBS' : 'JOG=PAGE'};
+    drawFooter(footer);
     needsRedraw = false;
 }
 
