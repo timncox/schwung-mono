@@ -3,7 +3,7 @@
   "name": "Mono Voice",
   "abbrev": "MONV",
   "version": "0.2.0",
-  "description": "Monomachine-inspired digital machine voice: SuperWave, SID, DigiPRO and FM",
+  "description": "Digital machine voice with SuperWave, SID, user-wave DigiPRO, FM and arp",
   "dsp": "dsp.so",
   "ui_chain": "ui_chain.js",
   "api_version": 2,

@@ -87,6 +87,7 @@ const COMMON_SHIFT = [null,
 
 let page = 0, machine = 0, shift = false, shiftVisual = false;
 let recordArmed = false, tickCount = 0;
+let arpEnabled = false, arpLatch = false, userWaveMask = 0;
 let values = new Array(8).fill(0);
 let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
@@ -140,7 +141,11 @@ function machineParameterValue(i, value) {
         if (i === 6) return noteName(value);
     }
     if (machine === 4) {
-        if (i === 0) return `W${String(bandIndex(value, 32)).padStart(2, '0')}`;
+        if (i === 0) {
+            const wave = bandIndex(value, 32);
+            return wave >= 24 && ((userWaveMask >> (wave - 24)) & 1)
+                ? `USR${wave - 23}` : `W${String(wave).padStart(2, '0')}`;
+        }
         if (i === 3) return value < 64 ? 'OFF' : 'ON';
         if (i === 4) return ['OFF','SFRQ','PRCH'][bandIndex(value, 3)];
         if (i === 5) return noteName(value);
@@ -195,6 +200,9 @@ function fetchAll() {
     if (mv === null) return false;
     machine = Math.max(0, Math.min(MACHINES.length - 1, parseInt(mv, 10) || 0));
     recordArmed = parseInt(gp('record') || '0', 10) !== 0;
+    arpEnabled = parseInt(gp('arp_enabled') || '0', 10) !== 0;
+    arpLatch = parseInt(gp('arp_latch') || '0', 10) !== 0;
+    userWaveMask = parseInt(gp('user_wave_mask') || '0', 10) || 0;
     host_module_set_param('page', `${page}`);
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
@@ -247,7 +255,7 @@ function adjust(i, delta) {
 function draw() {
     clear_screen();
     drawHeader(recordArmed ? `REC · ${MACHINES[machine]}`
-                           : `MONO V · ${MACHINES[machine]}`);
+                           : `${arpEnabled ? (arpLatch ? 'ARP L ·' : 'ARP ·') : 'MONO V ·'} ${MACHINES[machine]}`);
     const n = names();
     const shown = activeValues();
     const first = focusBank * 4;
@@ -259,7 +267,7 @@ function draw() {
     }
     drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
                 right: recordArmed ? 'REC: turn knobs'
-                    : (shiftActive() ? 'jog=machine' : 'jog=page')});
+                    : (shiftActive() ? 'Rec=arp · ←latch · →clear' : 'jog=page')});
     needsRedraw = false;
 }
 
@@ -290,14 +298,32 @@ globalThis.onMidiMessageInternal = function(data) {
     if ((data[0] & 0xF0) !== 0xB0) return;
     const cc = data[1], val = data[2];
     if (cc === MoveShift) { shift = val > 0; needsRedraw = true; return; }
-    if (cc === MoveRec && val > 0) { toggleRecord(); return; }
+    if (cc === MoveRec && val > 0) {
+        if (shiftActive()) {
+            arpEnabled = !arpEnabled;
+            host_module_set_param('arp_enabled', arpEnabled ? '1' : '0');
+            announce(arpEnabled ? 'Arpeggiator on' : 'Arpeggiator off');
+            needsRedraw = true;
+        } else toggleRecord();
+        return;
+    }
     if (cc === MoveMainKnob) {
         const d = decodeDelta(val);
         if (d) shiftActive() ? setMachine(machine + d) : setPage(page + d);
         return;
     }
-    if (cc === MoveLeft && val >= 64) { setPage(page - 1); return; }
-    if (cc === MoveRight && val >= 64) { setPage(page + 1); return; }
+    if (cc === MoveLeft && val >= 64) {
+        if (shiftActive()) {
+            arpLatch = !arpLatch; host_module_set_param('arp_latch', arpLatch ? '1' : '0');
+            announce(arpLatch ? 'Arpeggiator latch on' : 'Arpeggiator latch off'); needsRedraw = true;
+        } else setPage(page - 1);
+        return;
+    }
+    if (cc === MoveRight && val >= 64) {
+        if (shiftActive()) { host_module_set_param('arp_clear', '1'); announce('Latched notes cleared'); }
+        else setPage(page + 1);
+        return;
+    }
     if (cc >= MoveKnob1 && cc < MoveKnob1 + 8) {
         const d = decodeDelta(val);
         if (d) adjust(cc - MoveKnob1, d);

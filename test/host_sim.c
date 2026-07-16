@@ -91,6 +91,17 @@ static void get_string(mono_t *m, const char *key, char *buf, size_t size) {
     assert(mono_get_param(m, key, buf, (int)size) >= 0);
 }
 
+static int debug_note(mono_t *m) {
+    char debug[160];
+    unsigned events, blocks, nonzero, nonfinite;
+    int peak, lifetime, sample_rate, note;
+    get_string(m, "debug", debug, sizeof(debug));
+    assert(sscanf(debug, "%u:%d:%d:%u:%u:%u:%d:%d", &events, &peak,
+                  &lifetime, &blocks, &nonzero, &nonfinite, &sample_rate,
+                  &note) == 8);
+    return note;
+}
+
 static void test_all_machines_sound_distinct(void) {
     uint64_t hashes[MONO_MACHINE_COUNT];
     for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
@@ -928,14 +939,37 @@ static void test_full_state_round_trip(void) {
     mono_set_param(source, "set_step", "63:72:127:64:9");
     mono_set_param(source, "lock", "4:63:55:33");
     mono_set_param(source, "lock", "4:63:111:91");
+    mono_set_param(source, "edit_step", "63");
+    mono_set_param(source, "step_micro", "-13");
+    mono_set_param(source, "step_tie", "1");
+    mono_set_param(source, "step_accent", "76");
+    mono_set_param(source, "arp_enabled", "1");
+    mono_set_param(source, "arp_latch", "1");
+    mono_set_param(source, "arp_mode", "5");
+    mono_set_param(source, "arp_offset", "3:-7");
+    mono_set_param(source, "route_mode", "4");
+    mono_set_param(source, "route_amount", "93");
+    mono_set_param(source, "track_fx_type", "4");
+    mono_set_param(source, "track_fx_mix", "88");
+    mono_set_param(source, "morph_capture_a", "1");
+    mono_set_param(source, "syn1", "62");
+    mono_set_param(source, "morph_capture_b", "1");
+    mono_set_param(source, "morph", "32");
+    mono_set_param(source, "song_edit_row", "1");
+    mono_set_param(source, "song_length", "2");
+    mono_set_param(source, "song_start", "24");
+    mono_set_param(source, "song_row_length", "8");
+    mono_set_param(source, "song_repeats", "3");
+    mono_set_param(source, "song_transpose", "-5");
+    mono_set_param(source, "song_enabled", "1");
     mono_set_param(source, "step_page", "3");
     mono_set_param(source, "transport", "1");
 
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":9"));
-    assert(strstr(state, "\"data\":\"T0"));
+    assert(strstr(state, "\"v\":10"));
+    assert(strstr(state, "\"data\":\"G"));
 
     mono_set_param(restored, "transport", "1");
     mono_set_param(restored, "state", state);
@@ -951,6 +985,19 @@ static void test_full_state_round_trip(void) {
     assert(get_int(restored, "p8") == 111);
     assert(get_int(restored, "alt1") == 87);
     assert(get_int(restored, "alt8") == 29);
+    assert(get_int(restored, "step_micro") == -13);
+    assert(get_int(restored, "step_tie") == 1);
+    assert(get_int(restored, "step_accent") == 76);
+    assert(get_int(restored, "arp_enabled") == 1);
+    assert(get_int(restored, "arp_mode") == 5);
+    assert(get_int(restored, "route_mode") == 4);
+    assert(get_int(restored, "track_fx_type") == 4);
+    assert(get_int(restored, "morph_valid") == 3);
+    assert(get_int(restored, "song_enabled") == 1);
+    assert(get_int(restored, "song_length") == 2);
+    assert(get_int(restored, "song_edit_row") == 1);
+    assert(get_int(restored, "song_start") == 24);
+    assert(get_int(restored, "song_repeats") == 3);
     char steps[128];
     get_string(restored, "steps", steps, sizeof(steps));
     assert(steps[strlen(steps) - 1] == '2');
@@ -981,19 +1028,29 @@ static void test_v3_lfo_destinations_migrate(void) {
     mono_t *source = mono_create(&host, 1);
     mono_t *restored = mono_create(&host, 1);
     assert(source && restored);
+    uint8_t params[64] = {0};
+    char key[16];
+    for (int page = 0; page < MONO_PAGES; ++page) {
+        snprintf(key, sizeof(key), "%d", page);
+        mono_set_param(source, "page", key);
+        for (int i = 0; i < 8; ++i) {
+            snprintf(key, sizeof(key), "p%d", i + 1);
+            params[page * 8 + i] = (uint8_t)get_int(source, key);
+        }
+    }
+    mono_set_param(source, "page", "0");
+    for (int i = 0; i < 8; ++i) {
+        snprintf(key, sizeof(key), "syn%d", i + 9);
+        params[56 + i] = (uint8_t)get_int(source, key);
+    }
+    params[32] = 0x10; /* legacy Pitch */
+    params[40] = 0x20; /* legacy Filter Base */
+    params[48] = 0x60; /* legacy Delay */
     char state[4096];
-    assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":9");
-    char *data = strstr(state, "\"data\":\"");
-    assert(version && data);
-    version[4] = '3';
-    data += strlen("\"data\":\"");
-    assert(!strncmp(data, "T000", 4));
-    memmove(data + 4, data + 18, strlen(data + 18) + 1); /* strip v6-v9 track fields */
-    memcpy(data + 4 + 32 * 2, "10", 2); /* legacy Pitch */
-    memcpy(data + 4 + 40 * 2, "20", 2); /* legacy Filter Base */
-    memcpy(data + 4 + 48 * 2, "60", 2); /* legacy Delay */
-    strcpy(data + 4 + 64 * 2, "\"}");
+    int used = snprintf(state, sizeof(state), "{\"v\":3,\"data\":\"T000");
+    for (int i = 0; i < 64; ++i)
+        used += snprintf(state + used, sizeof(state) - (size_t)used, "%02X", params[i]);
+    snprintf(state + used, sizeof(state) - (size_t)used, "\"}");
 
     mono_set_param(restored, "state", state);
     assert(get_int(restored, "lfo1_1") == 1);
@@ -1017,17 +1074,27 @@ static void test_v8_pulse_panel_and_locks_migrate(void) {
 
     char state[8192];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":9");
+    char *version = strstr(state, "\"v\":10");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '8';
+    memmove(version + 5, version + 6, strlen(version + 6) + 1);
+    data = strstr(state, "\"data\":\"");
+    assert(data);
     data += strlen("\"data\":\"");
+    assert(data[0] == 'G');
+    memmove(data, data + 133, strlen(data + 133) + 1); /* strip v10 song record */
     assert(!strncmp(data, "T001", 4));
+    memmove(data + 18, data + 82, strlen(data + 82) + 1); /* strip arp/route */
     const char legacy_panel[] = "0A0B63212C7F4D42";
     memcpy(data + 18, legacy_panel, sizeof(legacy_panel) - 1);
     char *pulse_memory = strstr(data, "M001");
     assert(pulse_memory);
     memcpy(pulse_memory + 4, legacy_panel, sizeof(legacy_panel) - 1);
+    char *step_record = strstr(data, "S0");
+    assert(step_record);
+    memmove(step_record + 13, step_record + 14,
+            strlen(step_record + 14) + 1); /* strip v10 extended-step flags */
 
     mono_set_param(restored, "state", state);
     assert(get_int(restored, "machine") == MONO_SWAVE_PULSE);
@@ -1188,6 +1255,155 @@ static void test_maximum_lock_state_fits_overtake_channel(void) {
     mono_destroy(m);
 }
 
+static void test_arp_latch_modes_and_offsets(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "arp_enabled", "1");
+    mono_set_param(m, "arp_latch", "1");
+    mono_set_param(m, "arp_rate", "7");
+    mono_set_param(m, "arp_octaves", "2");
+    mono_set_param(m, "arp_gate", "110");
+    mono_set_param(m, "arp_length", "2");
+    mono_set_param(m, "arp_offset", "0:0");
+    mono_set_param(m, "arp_offset", "1:7");
+    mono_note_on(m, 0, 48, 90);
+    mono_note_on(m, 0, 52, 110);
+    assert(render_energy(m, 8) > 1000);
+    int first = debug_note(m);
+    mono_note_off(m, 0, 48);
+    mono_note_off(m, 0, 52);
+    assert(render_energy(m, 32) > 1000); /* latched chord keeps clocking */
+    mono_note_on(m, 0, 60, 100);         /* a new physical chord replaces it */
+    assert(render_energy(m, 16) > 1000);
+    assert(debug_note(m) >= 60 && debug_note(m) != first);
+    mono_set_param(m, "arp_clear", "1");
+    assert(debug_note(m) == -1);
+    assert(get_int(m, "arp_octaves") == 2);
+    char offsets[128];
+    get_string(m, "arp_offsets", offsets, sizeof(offsets));
+    assert(!strncmp(offsets, "0,7,", 4));
+    mono_destroy(m);
+}
+
+static void test_patch_library_randomization_and_morph(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    assert(get_int(m, "patch_count") >= 12);
+    char names[512];
+    get_string(m, "patch_names", names, sizeof(names));
+    assert(strstr(names, "Chrome Bass") && strstr(names, "Soft Operator"));
+    mono_set_param(m, "patch_load", "0");
+    int a = get_int(m, "syn1");
+    mono_set_param(m, "morph_capture_a", "1");
+    mono_set_param(m, "syn1", "20");
+    mono_set_param(m, "morph_capture_b", "1");
+    mono_set_param(m, "morph", "64");
+    int halfway = get_int(m, "syn1");
+    assert(get_int(m, "morph_valid") == 3);
+    assert(halfway > 20 && halfway < a);
+    mono_set_param(m, "patch_randomize", "1");
+    assert(get_int(m, "morph_valid") == 0);
+    mono_destroy(m);
+}
+
+static void test_user_wave_upload_and_persistence(void) {
+    const char *path = "/tmp/mono-user-wave-test.bin";
+    remove(path);
+    mono_t *m = mono_create_with_storage(&host, 1, path);
+    assert(m);
+    mono_set_param(m, "wave_begin", "0");
+    for (int chunk = 0; chunk < 8; ++chunk) {
+        char payload[256];
+        int used = snprintf(payload, sizeof(payload), "0:%d:", chunk * 64);
+        for (int i = 0; i < 64; ++i) {
+            int sample = chunk * 64 + i;
+            int encoded = 2048 + ((sample * 8) % 2048) - 1024;
+            used += snprintf(payload + used, sizeof(payload) - (size_t)used,
+                             "%03X", encoded);
+        }
+        mono_set_param(m, "wave_chunk", payload);
+    }
+    mono_set_param(m, "wave_commit", "0");
+    assert(mono_debug_user_wave_mask(m) == 1);
+    mono_destroy(m);
+    m = mono_create_with_storage(&host, 1, path);
+    assert(m && mono_debug_user_wave_mask(m) == 1);
+    mono_set_param(m, "machine", "4");
+    mono_set_param(m, "syn1", "100"); /* selects one of the user slots */
+    mono_note_on(m, 0, 48, 110);
+    assert(render_energy(m, 8) > 1000);
+    mono_set_param(m, "wave_clear", "0");
+    assert(mono_debug_user_wave_mask(m) == 0);
+    mono_destroy(m);
+    remove(path);
+}
+
+static void test_neighbor_routing_and_track_fx(void) {
+    mono_t *plain = mono_create(&host, 2);
+    mono_t *routed = mono_create(&host, 2);
+    assert(plain && routed);
+    mono_note_on(plain, 0, 48, 110);
+    mono_note_on(plain, 1, 55, 110);
+    mono_note_on(routed, 0, 48, 110);
+    mono_note_on(routed, 1, 55, 110);
+    mono_set_param(routed, "track", "1");
+    mono_set_param(routed, "route_mode", "3");
+    mono_set_param(routed, "route_amount", "127");
+    mono_set_param(routed, "track_fx_type", "6");
+    mono_set_param(routed, "track_fx_amount", "96");
+    mono_set_param(routed, "track_fx_tone", "20");
+    mono_set_param(routed, "track_fx_mix", "127");
+    assert(render_hash_long(plain) != render_hash_long(routed));
+    mono_destroy(plain);
+    mono_destroy(routed);
+}
+
+static void test_microtiming_accent_ties_and_song_mode(void) {
+    mono_t *late = mono_create(&host, 1);
+    assert(late);
+    mono_set_param(late, "set_step", "0:48:70:100:15");
+    mono_set_param(late, "edit_step", "0");
+    mono_set_param(late, "step_micro", "23");
+    mono_set_param(late, "step_accent", "127");
+    mono_set_param(late, "transport", "1");
+    assert(render_energy(late, 8) == 0);
+    assert(render_energy(late, 24) > 1000);
+    mono_destroy(late);
+
+    mono_t *song = mono_create(&host, 1);
+    assert(song);
+    mono_set_param(song, "set_step", "0:48:90:100:15");
+    mono_set_param(song, "edit_step", "0");
+    mono_set_param(song, "step_tie", "1");
+    mono_set_param(song, "song_edit_row", "0");
+    mono_set_param(song, "song_start", "0");
+    mono_set_param(song, "song_row_length", "1");
+    mono_set_param(song, "song_repeats", "2");
+    mono_set_param(song, "song_transpose", "12");
+    mono_set_param(song, "song_enabled", "1");
+    mono_set_param(song, "transport", "1");
+    assert(debug_note(song) == 60);
+    assert(get_int(song, "step_tie") == 1);
+    assert(get_int(song, "song_repeats") == 2);
+    mono_destroy(song);
+}
+
+static void test_calibration_generators_and_metrics(void) {
+    mono_t *m = mono_create(&host, 1);
+    assert(m);
+    mono_set_param(m, "calibration_level", "64");
+    mono_set_param(m, "calibration_mode", "1");
+    assert(render_energy(m, 4) > 1000);
+    char metrics[128];
+    get_string(m, "calibration_metrics", metrics, sizeof(metrics));
+    assert(strchr(metrics, ':'));
+    mono_set_param(m, "calibration_reset", "1");
+    get_string(m, "calibration_metrics", metrics, sizeof(metrics));
+    assert(!strncmp(metrics, "0:0:0:0:0", 9));
+    mono_set_param(m, "calibration_mode", "0");
+    mono_destroy(m);
+}
+
 int main(void) {
     test_all_machines_sound_distinct();
     test_superwave_saw_rejects_folded_harmonics();
@@ -1223,6 +1439,12 @@ int main(void) {
     test_machine_memory_and_track_mute_solo();
     test_dense_pattern_fits_host_state_limit();
     test_maximum_lock_state_fits_overtake_channel();
+    test_arp_latch_modes_and_offsets();
+    test_patch_library_randomization_and_morph();
+    test_user_wave_upload_and_persistence();
+    test_neighbor_routing_and_track_fx();
+    test_microtiming_accent_ties_and_song_mode();
+    test_calibration_generators_and_metrics();
     puts("mono host simulator: all tests passed");
     return 0;
 }

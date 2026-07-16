@@ -76,8 +76,30 @@ remaining a clean-room implementation:
   key-track by default.
 
 The Move and Remote UIs show the discrete machine choices as names, ratios,
-notes, or On/Off states instead of raw numbers. State v9 migrates older Pulse
+notes, or On/Off states instead of raw numbers. State v10 migrates older Pulse
 panels and their parameter locks to the corrected control layout.
+
+## Performance expansion
+
+- **Arp Designer:** per-track On/Latch, Up/Down/Pendulum/Random/Played/Converge
+  modes, eight clock divisions, one to four octaves, gate, fixed-or-played
+  velocity, and a 16-step ±24-semitone offset lane. Mono Voice shortcuts are
+  Shift + Record (arp), Shift + Left (latch), and Shift + Right (clear).
+- **Patch Lab:** 12 original starting sounds, Init, bounded randomization, and
+  two complete same-machine parameter snapshots that morph across all 112
+  controls. Discrete choices switch cleanly at the midpoint.
+- **DigiPRO user waves:** eight persistent 512-sample slots shared by Mono and
+  Mono Voice. Remote UI imports an audio file; the engine DC-centers,
+  normalizes, and 12-bit quantizes it before an atomic bank save.
+- **Neighbor and track FX:** each track can mix, replace, ring-modulate, or FM
+  its oscillator from the preceding track, then use dedicated chorus, flanger,
+  ring modulation, reverb, compression, or crushing.
+- **Deeper sequencing:** every step adds ±23/48-step microtiming, tie, and
+  accent. Sixteen song rows chain arbitrary windows with repeats and ±24
+  semitone transposition.
+- **Calibration:** Remote UI can replace output with a conservative 440 Hz
+  sine, logarithmic sweep, impulse, deterministic noise, or stereo-polarity
+  test and reports device-side output peaks/non-finite counts.
 
 ## Live knob recording
 
@@ -132,7 +154,8 @@ scripts/deploy.sh
 - Top-row pads 1-6: select track
 - Top-row pad 7: cycle machine; Shift reverses direction
 - Top-row pad 8: start/stop internal sequencer
-- Shift + top-row pad 8: open Sequence Setup
+- Shift + top-row pad 8: open Setup; turn the jog for Sequence, Step Detail,
+  Arpeggiator, Routing + FX, and Song Mode
 - Delete + top-row pads 1-6: mute/unmute a track
 - Shift + Delete + top-row pads 1-6: solo/unsolo a track
 - Lower three pad rows: chromatic performance keyboard
@@ -147,7 +170,8 @@ scripts/deploy.sh
 - Undo: undo or redo the most recent sound, pattern, or timing edit
 - Move Record: arm/disarm live knob-lock recording during playback
 
-Sequence Setup keeps timing controls off the sound-editing screen. Knobs 1–4
+Setup keeps performance controls off the sound-editing screen. Its Sequence
+page uses knobs 1–4 to
 set global start, length, Forward/Reverse/Pendulum/Random order, and swing.
 Knobs 5–8 set the selected track's start, length, rotation, and clock division;
 Shift + turn on that bank returns it to the global window. Tap a step to set
@@ -165,23 +189,26 @@ quick click gets a short, audible gate. The status confirms the event was sent,
 while the counter and last measured peak provide device-side diagnostics when
 Schwung refreshes the module state. If the panel is waiting, select a different
 Remote UI Slot tab and return to reconnect Schwung's slot subscription.
-Remote edits use Mono's event command channel so Schwung 0.11.4 does not remount
+Remote edits use Mono's event command channel so Schwung does not remount
 the custom editor for every value emitted during a slider drag.
 The Remote sequence panel also provides step/track copy and paste, undo/redo,
 mute/solo, and an Edit Step mode for note, velocity, gate, trig mask,
-probability, 1–8 retrigs, 1:2/2:2/1:4…4:4 conditions, and slide time.
+probability, 1–8 retrigs, 1:2/2:2/1:4…4:4 conditions, slide, microtiming,
+ties, and accents. Patch Lab, Arp Designer, user-wave import, neighbor/track
+FX, song rows, and calibration live alongside the sequence panel.
 
 ## Clean-room scope
 
 Mono contains no Elektron firmware, factory wavetables, factory samples, or
 copied visual assets. The synthesis algorithms are original implementations
-guided by publicly documented behavior and regression measurements. Exact
-response-curve calibration against reference hardware is future work.
+guided by publicly documented behavior and regression measurements. The
+calibration signal suite supports controlled comparisons, but exact
+response-curve matching still requires recordings from reference hardware.
 
 ## Current fidelity boundary
 
-Mono does not yet include VO-6, BeatBox, DigiPRO user-wave
-loading, FM+ Parallel/Dynamic, FX machines/neighbor routing, arpeggiators,
-or song mode. The current factory-independent algorithms also need A/B
-calibration against a reference Monomachine before they should be described
-as sonically faithful.
+Mono does not yet include VO-6, BeatBox, FM+ Parallel/Dynamic, or dedicated FX
+machines. Its neighbor routing, per-track FX, user waves, arpeggiator, and song
+mode are original clean-room implementations rather than firmware clones. The
+factory-independent algorithms still need A/B measurements against reference
+hardware before they should be described as sonically faithful.

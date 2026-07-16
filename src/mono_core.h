@@ -16,6 +16,9 @@
 #define MONO_PARAMS (MONO_PRIMARY_PARAMS + MONO_SHIFT_PARAMS)
 #define MONO_LOCK_WORDS ((MONO_PARAMS + 63) / 64)
 #define MONO_LFO_DESTINATIONS (MONO_PARAMS + 2) /* Off, Pitch, then every param */
+#define MONO_ARP_STEPS 16
+#define MONO_USER_WAVES 8
+#define MONO_SONG_ROWS 16
 
 typedef enum {
     MONO_SWAVE_SAW = 0,
@@ -38,6 +41,8 @@ typedef enum {
 typedef struct mono mono_t;
 
 mono_t *mono_create(const host_api_v1_t *host, int track_count);
+mono_t *mono_create_with_storage(const host_api_v1_t *host, int track_count,
+                                 const char *user_wave_path);
 void mono_destroy(mono_t *m);
 void mono_render(mono_t *m, int16_t *out_lr, int frames);
 void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source);
@@ -54,5 +59,6 @@ void mono_debug_render_oscillator(mono_t *m, int track, float frequency,
                                   float *out, int frames);
 void mono_debug_filter_cutoffs(mono_t *m, int track, float *highpass_hz,
                                float *lowpass_hz);
+int mono_debug_user_wave_mask(const mono_t *m);
 
 #endif

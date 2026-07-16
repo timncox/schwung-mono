@@ -86,9 +86,23 @@
   .audition-status.warn { color:#4d0d09; background:#e7b2ad; }
   .master { display:grid; grid-template-columns:auto 1fr 40px; gap:8px; align-items:center; margin-top:9px; }
   .hint { margin-top:8px; color:#b8b9b2; font-size:10px; font-weight:400; }
+  .feature-grid { display:grid; grid-template-columns:repeat(2,minmax(280px,1fr)); gap:10px; }
+  .feature { min-width:0; padding:10px; color:#eee; background:#242622; border:1px solid #090a09; }
+  .feature h2 { margin:0 0 8px; color:var(--lcd); font-size:12px; letter-spacing:.14em; }
+  .feature-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:7px; }
+  .feature-row label { display:flex; align-items:center; gap:5px; font-size:9px; }
+  .feature-row input,.feature-row select { min-width:58px; height:30px; color:#eee; background:#292b28;
+    border:1px solid #5d5f58; border-radius:3px; padding:4px; }
+  .feature-row input[type=range] { width:150px; }
+  .arp-offsets { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; margin-top:8px; }
+  .arp-offsets label { display:grid; gap:2px; text-align:center; color:#aaa; font-size:8px; }
+  .arp-offsets input { width:100%; min-width:0; height:28px; color:#eee; background:#171916;
+    border:1px solid #555; text-align:center; }
+  .meter { flex:1; min-width:100px; height:8px; background:#10110f; border:1px solid #555; }
+  .meter i { display:block; width:0; height:100%; background:var(--green); }
   #offline { margin-top:12px; padding:14px; color:#322; background:#e7b2ad; border:1px solid #7e1d18; }
   @media(max-width:850px) {
-    .top,.lower { grid-template-columns:1fr; }
+    .top,.lower,.feature-grid { grid-template-columns:1fr; }
     .control-grid { grid-template-columns:repeat(4,1fr); }
     .steps { grid-template-columns:repeat(8,1fr); }
   }
@@ -127,6 +141,38 @@
       <input id="patchFile" type="file" accept="application/json,.json" hidden>
       <div class="hint">Export a portable sound/pattern backup or import one previously exported by Mono.</div>
     </section>
+    <section class="section feature-grid">
+      <div class="feature"><h2>PATCH LAB / SOUND MORPH</h2>
+        <div class="feature-row"><select id="factoryPatch"></select><button id="loadPatch">LOAD</button><button id="initPatch">INIT</button><button id="randomPatch">RANDOMIZE</button></div>
+        <div class="feature-row"><button id="captureA">CAPTURE A</button><button id="captureB">CAPTURE B</button><label>MORPH <input id="morph" type="range" min="0" max="127" value="0"></label><output class="value" id="morphValue">000</output></div>
+        <div class="hint" id="morphStatus">Capture A and B on the same machine, then sweep every compatible sound parameter together.</div>
+      </div>
+      <div class="feature"><h2>ARPEGGIATOR / LATCH</h2>
+        <div class="feature-row"><button id="arpEnabled">ARP OFF</button><button id="arpLatch">LATCH OFF</button><button id="arpClear">CLEAR NOTES</button>
+          <label>MODE <select id="arpMode"></select></label><label>RATE <select id="arpRate"></select></label></div>
+        <div class="feature-row"><label>OCT <input id="arpOctaves" type="number" min="1" max="4"></label><label>GATE <input id="arpGate" type="number" min="1" max="127"></label><label>LENGTH <input id="arpLength" type="number" min="1" max="16"></label><label>VELOCITY <input id="arpVelocity" type="number" min="0" max="127"></label></div>
+        <div class="arp-offsets" id="arpOffsets"></div>
+      </div>
+      <div class="feature"><h2>NEIGHBOR ROUTING / TRACK FX</h2>
+        <div class="feature-row"><label>ROUTE <select id="routeMode"></select></label><label>AMOUNT <input id="routeAmount" type="number" min="0" max="127"></label><label>FX <select id="trackFxType"></select></label></div>
+        <div class="feature-row"><label>AMOUNT <input id="trackFxAmount" type="number" min="0" max="127"></label><label>TONE <input id="trackFxTone" type="number" min="0" max="127"></label><label>FEEDBACK <input id="trackFxFeedback" type="number" min="0" max="127"></label><label>MIX <input id="trackFxMix" type="number" min="0" max="127"></label><label>LEVEL <input id="trackLevel" type="number" min="0" max="127"></label></div>
+        <div class="hint">A track can mix, replace, ring-modulate, or frequency-modulate its oscillator with the previous track before its own filter and dedicated FX.</div>
+      </div>
+      <div class="feature"><h2>DIGIPRO USER WAVES</h2>
+        <div class="feature-row"><label>SLOT <select id="waveSlot"></select></label><input id="waveFile" type="file" accept="audio/*,.wav"><button id="uploadWave">LOAD AUDIO</button><button id="clearWave">CLEAR SLOT</button></div>
+        <div class="hint" id="waveStatus">Eight persistent 512-sample slots are shared by Mono and Mono Voice. Audio is DC-centered, normalized, and quantized on Move.</div>
+      </div>
+      <div class="feature" id="songFeature"><h2>SONG / PATTERN CHAIN</h2>
+        <div class="feature-row"><button id="songEnabled">SONG OFF</button><label>ROWS <input id="songLength" type="number" min="1" max="16"></label><label>EDIT ROW <input id="songEditRow" type="number" min="1" max="16"></label></div>
+        <div class="feature-row"><label>START <input id="songStart" type="number" min="1" max="64"></label><label>LENGTH <input id="songRowLength" type="number" min="1" max="64"></label><label>REPEATS <input id="songRepeats" type="number" min="1" max="16"></label><label>TRANSPOSE <input id="songTranspose" type="number" min="-24" max="24"></label></div>
+        <div class="hint" id="songSummary">Each row chooses a step window, repeat count, and transposition.</div>
+      </div>
+      <div class="feature"><h2>CALIBRATION / SELF TEST</h2>
+        <div class="feature-row"><label>SIGNAL <select id="calibrationMode"></select></label><label>LEVEL <input id="calibrationLevel" type="number" min="0" max="127"></label><button id="calibrationReset">RESET METERS</button></div>
+        <div class="feature-row"><span>OUTPUT PEAK</span><div class="meter"><i id="calibrationMeter"></i></div><span id="calibrationReadout">0</span></div>
+        <div class="hint">Warning: test mode replaces instrument audio. Start low. Includes 440 Hz, logarithmic sweep, impulse, deterministic noise, and stereo polarity checks.</div>
+      </div>
+    </section>
     <section class="section lower">
       <div class="sequencer" id="sequencer">
         <div class="seqbar"><button id="editStep">EDIT STEP</button><button id="copyStep">COPY STEP</button><button id="pasteStep">PASTE STEP</button><button id="clearStep">CLEAR STEP</button><button id="undo">UNDO / REDO</button><button id="copyTrack">COPY TRACK</button><button id="pasteTrack">PASTE TRACK</button></div>
@@ -152,8 +198,11 @@
           <label>RETRIG <input id="stepRetrig" type="number" min="1" max="8" value="1"></label>
           <label>CONDITION <select id="stepCondition"><option value="0">ALWAYS</option><option value="1">1:2</option><option value="2">2:2</option><option value="3">1:4</option><option value="4">2:4</option><option value="5">3:4</option><option value="6">4:4</option></select></label>
           <label>SLIDE <input id="stepSlide" type="number" min="0" max="100" value="0"></label>
+          <label>MICROTIMING <input id="stepMicro" type="number" min="-23" max="23" value="0"></label>
+          <label>TIE <input id="stepTie" type="checkbox"></label>
+          <label>ACCENT <input id="stepAccent" type="number" min="0" max="127" value="0"></label>
         </div>
-        <div class="hint">All 64 steps are shown. Click to toggle; choose Edit Step for probability, conditions, retrigs, and slide. Purple steps contain parameter locks.</div>
+        <div class="hint">All 64 steps are shown. Edit Step adds microtiming (±23/48 of a step), ties, accents, probability, conditions, retrigs, and slide. Purple steps contain parameter locks.</div>
       </div>
       <div class="keyboard"><div class="legend">AUDITION KEYBOARD</div>
         <div class="audition-status" id="auditionStatus" role="status" aria-live="polite">Hold a note to audition the selected track.</div>
@@ -220,6 +269,12 @@ const KEY_NOTES = [48,49,50,51,52,53,54,55,56,57,58,59,60];
 const KEYBOARD = ["a","w","s","e","d","f","t","g","y","h","u","j","k"];
 const NOTE_NAMES = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
 const BLACK = new Set([1,3,6,8,10]);
+const FACTORY_PATCHES = ["Chrome Bass","Wide Current","Hollow Wire","PWM Basin","Glass Choir","Just Fifths","Arcade Lead","Dust Pulse","Scan Bell","Circuit Reed","Metal Key","Soft Operator"];
+const ARP_MODES = ["UP","DOWN","PENDULUM","RANDOM","PLAYED","CONVERGE"];
+const ARP_RATES = ["1/4","1/8","1/8T","1/16","1/16T","1/32","1/32T","1/64"];
+const ROUTE_MODES = ["OFF","NEIGHBOR MIX","NEIGHBOR ONLY","RING MOD","NEIGHBOR FM"];
+const TRACK_FX = ["OFF","CHORUS","FLANGER","RING MOD","REVERB","COMPRESSOR","CRUSHER"];
+const CALIBRATION_MODES = ["OFF","440 HZ SINE","20 HZ–20 KHZ SWEEP","IMPULSE","WHITE NOISE","STEREO POLARITY"];
 let PREFIX = null;
 let lastParamAt = 0;
 let lastStateRaw = null;
@@ -254,7 +309,7 @@ function machineParameterValue(i,value){
   if(machine===1&&i===6)return value<64?"Off":"On";
   if(machine===2&&i<3){if(value<4)return "Off";if(value>=112)return ["6/5","5/4","4/3","3/2"][Math.min(3,Math.floor((value-112)/4))];return `${Math.round((value-4)*24/107)} semitones`;}
   if(machine===3){if(i===2)return value<64?"Off":"On";if(i===3)return ["Triangle","Saw","Pulse","Mixed","Noise"][bandIndex(value,5)];if(i===4)return ["Off","Ring","Sync","Ring + Sync"][bandIndex(value,4)];if(i===5)return value<64?"MFRQ":"Previous track";if(i===6)return parameterNoteName(value);}
-  if(machine===4){if(i===0)return `Wave ${String(bandIndex(value,32)).padStart(2,"0")}`;if(i===3)return value<64?"Off":"On";if(i===4)return ["Off","SFRQ","Previous track"][bandIndex(value,3)];if(i===5)return parameterNoteName(value);}
+  if(machine===4){if(i===0){const wave=bandIndex(value,32);return wave>=24&&((number("user_wave_mask")>>(wave-24))&1)?`User ${wave-23}`:`Wave ${String(wave).padStart(2,"0")}`;}if(i===3)return value<64?"Off":"On";if(i===4)return ["Off","SFRQ","Previous track"][bandIndex(value,3)];if(i===5)return parameterNoteName(value);}
   if(machine===5&&(i===0||i===4))return FM_RATIO_NAMES[bandIndex(value,32)];
   return null;
 }
@@ -297,6 +352,11 @@ function makeButtons(root, names, action) {
 makeButtons(el("tracks"), ["T1","T2","T3","T4","T5","T6"], i=>{send("track",i); render();});
 makeButtons(el("machines"), MACHINES, i=>{send("machine",i); render();});
 makeButtons(el("pages"), PAGES, i=>{send("page",i);render();});
+function fillSelect(id,names){names.forEach((name,i)=>{const option=document.createElement("option");option.value=i;option.textContent=name;el(id).appendChild(option);});}
+fillSelect("factoryPatch",FACTORY_PATCHES);fillSelect("arpMode",ARP_MODES);fillSelect("arpRate",ARP_RATES);
+fillSelect("routeMode",ROUTE_MODES);fillSelect("trackFxType",TRACK_FX);fillSelect("calibrationMode",CALIBRATION_MODES);
+for(let slot=0;slot<8;slot++){const option=document.createElement("option");option.value=slot;option.textContent=`USER ${slot+1}`;el("waveSlot").appendChild(option);}
+for(let i=0;i<16;i++){const label=document.createElement("label");label.textContent=String(i+1).padStart(2,"0");const input=document.createElement("input");input.type="number";input.min=-24;input.max=24;input.value=0;input.onchange=()=>send("arp_offset",`${i}:${Math.max(-24,Math.min(24,Number(input.value)||0))}`);label.appendChild(input);el("arpOffsets").appendChild(label);}
 el("layer").onclick=()=>{altLayer=!altLayer;render();};
 for (let i=0;i<8;i++) {
   const box=document.createElement("div"); box.className="control";
@@ -325,6 +385,53 @@ const stepInputs={stepNote:["step_note",-1,127],stepVelocity:["step_velocity",1,
 Object.entries(stepInputs).forEach(([id,[key,min,max]])=>el(id).onchange=()=>send(key,Math.max(min,Math.min(max,Number(el(id).value)||0))));
 el("stepProbability").onchange=()=>send("step_probability",Math.round(Math.max(0,Math.min(100,Number(el("stepProbability").value)||0))*127/100));
 el("stepSlide").onchange=()=>send("step_slide",Math.round(Math.max(0,Math.min(100,Number(el("stepSlide").value)||0))*127/100));
+el("stepMicro").onchange=()=>send("step_micro",Math.max(-23,Math.min(23,Number(el("stepMicro").value)||0)));
+el("stepTie").onchange=()=>send("step_tie",el("stepTie").checked?1:0);
+el("stepAccent").onchange=()=>send("step_accent",Math.max(0,Math.min(127,Number(el("stepAccent").value)||0)));
+
+function bindNumber(id,key,min,max,offset=0){el(id).onchange=()=>{const value=Math.max(min,Math.min(max,(Number(el(id).value)||0)+offset));send(key,value);render();};}
+function bindSelect(id,key){el(id).onchange=()=>{send(key,el(id).value);render();};}
+el("loadPatch").onclick=()=>{send("patch_load",el("factoryPatch").value);render();};
+el("initPatch").onclick=()=>{send("patch_init",1);render();};
+el("randomPatch").onclick=()=>{send("patch_randomize",1);render();};
+el("captureA").onclick=()=>{send("morph_capture_a",1);render();};
+el("captureB").onclick=()=>{send("morph_capture_b",1);render();};
+el("morph").oninput=()=>{touched.morph=Date.now();el("morphValue").value=String(el("morph").value).padStart(3,"0");send("morph",el("morph").value);};
+el("arpEnabled").onclick=()=>{send("arp_enabled",number("arp_enabled")?0:1);render();};
+el("arpLatch").onclick=()=>{send("arp_latch",number("arp_latch")?0:1);render();};
+el("arpClear").onclick=()=>send("arp_clear",1);
+bindSelect("arpMode","arp_mode");bindSelect("arpRate","arp_rate");
+bindNumber("arpOctaves","arp_octaves",1,4);bindNumber("arpGate","arp_gate",1,127);
+bindNumber("arpLength","arp_length",1,16);bindNumber("arpVelocity","arp_velocity",0,127);
+bindSelect("routeMode","route_mode");bindSelect("trackFxType","track_fx_type");
+bindNumber("routeAmount","route_amount",0,127);bindNumber("trackFxAmount","track_fx_amount",0,127);
+bindNumber("trackFxTone","track_fx_tone",0,127);bindNumber("trackFxFeedback","track_fx_feedback",0,127);
+bindNumber("trackFxMix","track_fx_mix",0,127);bindNumber("trackLevel","track_level",0,127);
+el("songEnabled").onclick=()=>{send("song_enabled",number("song_enabled")?0:1);render();};
+bindNumber("songLength","song_length",1,16);bindNumber("songEditRow","song_edit_row",0,15,-1);
+bindNumber("songStart","song_start",0,63,-1);bindNumber("songRowLength","song_row_length",1,64);
+bindNumber("songRepeats","song_repeats",1,16);bindNumber("songTranspose","song_transpose",-24,24);
+bindSelect("calibrationMode","calibration_mode");bindNumber("calibrationLevel","calibration_level",0,127);
+el("calibrationReset").onclick=()=>send("calibration_reset",1);
+el("clearWave").onclick=()=>{send("wave_clear",el("waveSlot").value);render();};
+el("uploadWave").onclick=async()=>{
+  const file=el("waveFile").files&&el("waveFile").files[0],slot=Number(el("waveSlot").value)||0;
+  if(!file){el("waveStatus").textContent="Choose an audio file first.";return;}
+  try{
+    const context=new (window.AudioContext||window.webkitAudioContext)();
+    const decoded=await context.decodeAudioData(await file.arrayBuffer());
+    const samples=decoded.getChannelData(0);if(!samples.length)throw new Error("empty audio");
+    const wave=new Int16Array(512);
+    for(let i=0;i<512;i++){const position=i*(samples.length-1)/511,lo=Math.floor(position),hi=Math.min(samples.length-1,lo+1),fraction=position-lo;wave[i]=Math.round(Math.max(-1,Math.min(1,samples[lo]+(samples[hi]-samples[lo])*fraction))*2047);}
+    send("wave_begin",slot);
+    for(let chunk=0;chunk<8;chunk++){
+      let hex="";for(let i=0;i<64;i++){const encoded=Math.max(0,Math.min(4095,wave[chunk*64+i]+2048));hex+=encoded.toString(16).toUpperCase().padStart(3,"0");}
+      send("wave_chunk",`${slot}:${chunk*64}:${hex}`);
+    }
+    send("wave_commit",slot);el("waveStatus").textContent=`Loaded ${file.name} into User ${slot+1}.`;
+    await context.close();
+  }catch(error){el("waveStatus").textContent=`Wave import failed: ${error.message||error}`;}
+};
 function noteOn(note, button) {
   if(releaseTimers.has(note)){clearTimeout(releaseTimers.get(note));releaseTimers.delete(note);}
   if(held.has(note))return;
@@ -395,6 +502,7 @@ function render() {
   el("connectionText").textContent="CONNECTED";
   const voice=PREFIX==="synth:"; el("mode").textContent=voice?"MONO VOICE / SLOT":"MONO / OVERTAKE";
   el("trackSection").hidden=voice; el("sequencer").hidden=voice;
+  el("songFeature").hidden=voice;
   const machine=Math.max(0,Math.min(5,number("machine"))), page=Math.max(0,Math.min(6,number("page")));
   const track=Math.max(0,Math.min(5,number("track")));
   const trackStates=String(M.track_states||"").split(",").map(Number);
@@ -412,6 +520,18 @@ function render() {
     el(`value${i}`).value=displayValue(i,value);
   }
   syncRange("master",number("master",100),"masterValue");
+  syncRange("morph",number("morph"),"morphValue","morph");
+  const morphValid=number("morph_valid");el("captureA").classList.toggle("active",!!(morphValid&1));el("captureB").classList.toggle("active",!!(morphValid&2));
+  el("morphStatus").textContent=morphValid===3?"A + B ready. Enumerated controls switch at the midpoint; continuous controls interpolate.":morphValid?"Capture the other endpoint on this machine to enable morphing.":"Capture A and B on the same machine, then sweep the entire sound.";
+  el("arpEnabled").classList.toggle("active",!!number("arp_enabled"));el("arpEnabled").textContent=number("arp_enabled")?"ARP ON":"ARP OFF";
+  el("arpLatch").classList.toggle("active",!!number("arp_latch"));el("arpLatch").textContent=number("arp_latch")?"LATCH ON":"LATCH OFF";
+  [["arpMode","arp_mode"],["arpRate","arp_rate"],["routeMode","route_mode"],["trackFxType","track_fx_type"],["calibrationMode","calibration_mode"]].forEach(([id,key])=>{if(document.activeElement!==el(id))el(id).value=String(number(key));});
+  [["arpOctaves","arp_octaves",1],["arpGate","arp_gate",92],["arpLength","arp_length",16],["arpVelocity","arp_velocity",0],["routeAmount","route_amount",0],["trackFxAmount","track_fx_amount",0],["trackFxTone","track_fx_tone",0],["trackFxFeedback","track_fx_feedback",0],["trackFxMix","track_fx_mix",0],["trackLevel","track_level",64],["calibrationLevel","calibration_level",32]].forEach(([id,key,fallback])=>{if(document.activeElement!==el(id))el(id).value=number(key,fallback);});
+  const offsets=String(M.arp_offsets||"").split(",").map(Number);[...el("arpOffsets").querySelectorAll("input")].forEach((input,i)=>{if(document.activeElement!==input)input.value=offsets[i]||0;});
+  const waveMask=number("user_wave_mask");el("waveStatus").textContent=`Installed slots: ${waveMask?[0,1,2,3,4,5,6,7].filter(i=>(waveMask>>i)&1).map(i=>`User ${i+1}`).join(", "):"none"}. Choose audio to replace a slot.`;
+  el("songEnabled").classList.toggle("active",!!number("song_enabled"));el("songEnabled").textContent=number("song_enabled")?"SONG ON":"SONG OFF";
+  [["songLength",number("song_length",1)],["songEditRow",number("song_edit_row")+1],["songStart",number("song_start")+1],["songRowLength",number("song_row_length",16)],["songRepeats",number("song_repeats",1)],["songTranspose",number("song_transpose")]].forEach(([id,value])=>{if(document.activeElement!==el(id))el(id).value=value;});
+  const songRows=String(M.song_rows||"").split(";");el("songSummary").textContent=songRows.slice(0,number("song_length",1)).map((row,i)=>{const p=row.split(":").map(Number);return `${i+1}: S${String((p[0]||0)+1).padStart(2,"0")} × ${p[1]||16}, repeat ${p[2]||1}, ${p[3]>=0?"+":""}${p[3]||0} st`;}).join(" · ");
   const start=Math.max(0,Math.min(63,number("pattern_start"))),length=Math.max(1,Math.min(64-start,number("pattern_len",16)));
   const steps=String(M.all_steps||M.steps||"").split(",").map(Number), play=number("play_step",-1);
   [...el("steps").children].forEach((b,i)=>{b.classList.toggle("on",steps[i]===1);b.classList.toggle("locked",steps[i]===2);b.classList.toggle("playing",play===i);b.classList.toggle("outside",i<start||i>=start+length);b.classList.toggle("start",i===start);b.textContent=String(i+1).padStart(2,"0");});
@@ -419,7 +539,8 @@ function render() {
   const editing=stepTool==="edit",editStep=Math.max(0,Math.min(63,number("edit_step")));
   el("stepEditor").hidden=!editing;el("stepEditorTitle").textContent=`STEP ${String(editStep+1).padStart(2,"0")} DETAIL`;
   if(editing){
-    [["stepNote",number("step_note",-1)],["stepVelocity",number("step_velocity",100)],["stepGate",number("step_gate",100)],["stepTrig",number("step_trig",15)],["stepRetrig",number("step_retrig",1)],["stepCondition",number("step_condition",0)],["stepProbability",Math.round(number("step_probability",127)*100/127)],["stepSlide",Math.round(number("step_slide")*100/127)]].forEach(([id,value])=>{if(document.activeElement!==el(id))el(id).value=value;});
+    [["stepNote",number("step_note",-1)],["stepVelocity",number("step_velocity",100)],["stepGate",number("step_gate",100)],["stepTrig",number("step_trig",15)],["stepRetrig",number("step_retrig",1)],["stepCondition",number("step_condition",0)],["stepProbability",Math.round(number("step_probability",127)*100/127)],["stepSlide",Math.round(number("step_slide")*100/127)],["stepMicro",number("step_micro")],["stepAccent",number("step_accent")]].forEach(([id,value])=>{if(document.activeElement!==el(id))el(id).value=value;});
+    if(document.activeElement!==el("stepTie"))el("stepTie").checked=!!number("step_tie");
   }
   el("play").classList.toggle("active",!!number("transport")); el("play").textContent=number("transport")?"STOP":"PLAY";
   el("record").classList.toggle("active",!!number("record")); el("record").textContent=number("record")?"RECORDING ARMED":"ARM RECORDING";
@@ -442,6 +563,7 @@ function render() {
   el("screenTempo").textContent=`${Number(number("bpm",120)).toFixed(1)} BPM`;
   const debug=String(M.debug||"0:0:0").split(":"),events=Number(debug[0]||0),peak=Number(debug[2]||debug[1]||0);
   el("debug").textContent=`EVENTS ${events} / PEAK ${peak}`;
+  el("calibrationReadout").textContent=String(peak);el("calibrationMeter").style.width=`${Math.min(100,peak*100/32767)}%`;
   if(lastEventCount>=0&&events>lastEventCount)auditionMessage(peak>0?`MOVE RECEIVED NOTE · AUDIO PEAK ${peak}`:"MOVE RECEIVED NOTE · NO AUDIO PEAK",peak<=0);
   lastEventCount=events;
 }

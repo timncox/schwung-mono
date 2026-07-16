@@ -65,6 +65,22 @@
       ]
     },
     {
+      "title": "Arpeggiator",
+      "lines": [
+        "Shift + Record:",
+        "arp on or off.",
+        "Shift + Left:",
+        "latch on or off.",
+        "Shift + Right:",
+        "clear latched notes.",
+        "",
+        "Use Remote UI for",
+        "mode, rate, octaves,",
+        "gate, velocity and",
+        "16 pitch offsets."
+      ]
+    },
+    {
       "title": "Saving",
       "lines": [
         "Use Schwung User",

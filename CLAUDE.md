@@ -33,9 +33,10 @@ steps. The initial machine set is:
 4. DigiPRO-style 512-sample/12-bit wavetable oscillator
 5. FM+ Static-style two-block FM oscillator
 
-The wavetable bank is generated from original mathematical wave recipes at
-startup. User waveform import and reference-hardware calibration are later
-milestones.
+The wavetable bank starts from original mathematical wave recipes. Slots 24–31
+can be replaced by a shared, persistent `MONOWAV1` bank. Imports are uploaded in
+eight 64-sample chunks, DC-centered, normalized, quantized to 12 bits, and
+atomically saved outside module state.
 
 SuperWave saw/pulse edges are PolyBLEP band-limited. Pulse follows the
 documented base + close-unison-pair + two-sine-sub topology; Ensemble provides
@@ -73,7 +74,7 @@ to full key tracking.
 Each LFO destination is a direct 0-113 enum: Off, Pitch, then parameter IDs
 0-111. Modulation of LFO parameters is fed into the following sample and
 clamped, allowing cross- and self-modulation without recursive evaluation.
-State v9 stores this direct map, per-track timing and performance state,
+State v10 stores this direct map, per-track timing and performance state,
 machine-specific sound memories, and advanced step behavior while packing
 112-bit lock masks and 7-bit lock values compactly. State v2-v8 patches migrate
 on load; v2/v3 seven-destination LFO routings are translated to the direct map,
@@ -95,7 +96,8 @@ aliases.
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
 independent note/amp/filter/LFO trigger bits, probability, 1–8 retrigs, cycle
-condition, slide, and locks for any of the 112 sound parameters. On each trig,
+condition, slide, ±23/48-step microtiming, tie, accent, and locks for any of the
+112 sound parameters. On each trig,
 effective parameters reset to the track's base values and then apply that
 step's locks. MIDI clock advances at six ticks per 16th; swing offsets
 alternating steps, and the engine falls back to `host->get_bpm()` when its own
@@ -123,6 +125,18 @@ and divide their clock by 1–8. They also carry saved mute/solo state and a
 16-parameter memory for each synthesis machine. Step and track clipboards plus
 a snapshot swap provide copy/paste and one-level undo/redo without allocating
 in the audio render path.
+
+Each track also owns a clocked 16-step arpeggiator (six orders, latch, octave,
+gate, velocity, and pitch offsets), previous-track oscillator routing, and a
+one-second preallocated track-FX buffer. Sixteen song rows chain step windows
+with repeats and transposition. Patch morph endpoints, arp/route settings, song
+rows, microtiming, ties, and accents are part of state v10. Full-lock steps use
+a dense-state flag that omits their redundant 112-bit mask, keeping worst-case
+six-track state below the host's 64 KiB channel.
+
+Calibration modes replace the final mix with a low-level sine, sweep, impulse,
+noise, or stereo-polarity signal. They are intentionally not saved and expose
+the existing render peak and non-finite counters for device checks.
 
 ## Fidelity boundary
 

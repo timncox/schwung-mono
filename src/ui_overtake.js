@@ -116,6 +116,17 @@ let focusBank = 0;
 let presetMode = false, presetIndex = 0, presets = [];
 let deletePresetFile = null;
 let seqSetup = false;
+let setupPage = 0, setupIndex = 0, editStep = 0;
+let stepNote = 60, stepVelocity = 100, stepGate = 100, stepMicro = 0, stepTie = 0, stepAccent = 0, stepProbability = 127, stepRetrig = 1;
+let arpEnabled = 0, arpLatch = 0, arpMode = 0, arpRate = 3, arpOctaves = 1, arpGate = 92, arpLength = 16, arpVelocity = 0;
+let arpOffsets = new Array(16).fill(0);
+let routeMode = 0, routeAmount = 0, trackFxType = 0, trackFxAmount = 0, trackFxTone = 0, trackFxFeedback = 0, trackFxMix = 0, trackLevel = 64;
+let songEnabled = 0, songLength = 1, songEditRow = 0, songStart = 0, songRowLength = 16, songRepeats = 1, songTranspose = 0;
+const SETUP_PAGES = ['SEQUENCE', 'STEP DETAIL', 'ARPEGGIATOR', 'ROUTING + FX', 'SONG MODE'];
+const ARP_MODE_SCREEN = ['UP', 'DOWN', 'PEND', 'RAND', 'PLAY', 'CNVRG'];
+const ARP_RATE_SCREEN = ['1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32', '1/32T', '1/64'];
+const ROUTE_SCREEN = ['OFF', 'MIX', 'ONLY', 'RING', 'FM'];
+const TRACK_FX_SCREEN = ['OFF', 'CHOR', 'FLNG', 'RING', 'RVRB', 'COMP', 'CRSH'];
 
 function gp(key) {
     const v = host_module_get_param(key);
@@ -408,6 +419,24 @@ function fetchAll() {
     trackLen = Math.max(1, Math.min(64 - trackStart, parseInt(gp('track_len') || '16', 10) || 16));
     trackRotate = Math.max(0, Math.min(63, parseInt(gp('track_rotate') || '0', 10) || 0));
     trackDiv = Math.max(1, Math.min(8, parseInt(gp('track_div') || '1', 10) || 1));
+    editStep = Math.max(0, Math.min(63, parseInt(gp('edit_step') || '0', 10) || 0));
+    stepNote = parseInt(gp('step_note') || '60', 10); stepVelocity = parseInt(gp('step_velocity') || '100', 10);
+    stepGate = parseInt(gp('step_gate') || '100', 10); stepMicro = parseInt(gp('step_micro') || '0', 10);
+    stepTie = parseInt(gp('step_tie') || '0', 10); stepAccent = parseInt(gp('step_accent') || '0', 10);
+    stepProbability = parseInt(gp('step_probability') || '127', 10); stepRetrig = parseInt(gp('step_retrig') || '1', 10);
+    arpEnabled = parseInt(gp('arp_enabled') || '0', 10); arpLatch = parseInt(gp('arp_latch') || '0', 10);
+    arpMode = parseInt(gp('arp_mode') || '0', 10); arpRate = parseInt(gp('arp_rate') || '3', 10);
+    arpOctaves = parseInt(gp('arp_octaves') || '1', 10); arpGate = parseInt(gp('arp_gate') || '92', 10);
+    arpLength = parseInt(gp('arp_length') || '16', 10); arpVelocity = parseInt(gp('arp_velocity') || '0', 10);
+    arpOffsets = (gp('arp_offsets') || '').split(',').map(v => parseInt(v, 10) || 0); while (arpOffsets.length < 16) arpOffsets.push(0);
+    routeMode = parseInt(gp('route_mode') || '0', 10); routeAmount = parseInt(gp('route_amount') || '0', 10);
+    trackFxType = parseInt(gp('track_fx_type') || '0', 10); trackFxAmount = parseInt(gp('track_fx_amount') || '0', 10);
+    trackFxTone = parseInt(gp('track_fx_tone') || '0', 10); trackFxFeedback = parseInt(gp('track_fx_feedback') || '0', 10);
+    trackFxMix = parseInt(gp('track_fx_mix') || '0', 10); trackLevel = parseInt(gp('track_level') || '64', 10);
+    songEnabled = parseInt(gp('song_enabled') || '0', 10); songLength = parseInt(gp('song_length') || '1', 10);
+    songEditRow = parseInt(gp('song_edit_row') || '0', 10); songStart = parseInt(gp('song_start') || '0', 10);
+    songRowLength = parseInt(gp('song_row_length') || '16', 10); songRepeats = parseInt(gp('song_repeats') || '1', 10);
+    songTranspose = parseInt(gp('song_transpose') || '0', 10);
     const states = (gp('track_states') || '').split(',');
     for (let i = 0; i < 6; i++) trackStates[i] = parseInt(states[i], 10) || 0;
     machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
@@ -441,11 +470,20 @@ function setStepPage(next) {
 
 function openSeqSetup() {
     seqSetup = true;
+    setupPage = 0;
+    setupIndex = 0;
     heldStep = null;
     fetchAll();
     paintSteps(false);
     needsRedraw = true;
     announce('Sequence setup');
+}
+
+function setSetupPage(next) {
+    setupPage = (next + SETUP_PAGES.length) % SETUP_PAGES.length;
+    focusBank = 0;
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announce(SETUP_PAGES[setupPage]);
 }
 
 function closeSeqSetup() {
@@ -501,6 +539,58 @@ function adjustSeqSetup(i, delta) {
     else if (i === 5) setTrackTiming('track_len', Math.max(1, Math.min(64 - trackStart, trackLen + delta)), 'Track length');
     else if (i === 6) setTrackTiming('track_rotate', (trackRotate + delta + 64) % 64, 'Track rotation');
     else if (i === 7) setTrackTiming('track_div', Math.max(1, Math.min(8, trackDiv + delta)), 'Track division');
+}
+
+function setSetupValue(key, value, label) {
+    host_module_set_param(key, `${value}`);
+    fetchAll(); paintSteps(false); needsRedraw = true;
+    announceParameter(label, `${value}`);
+}
+
+function adjustSetup(i, delta) {
+    focusBank = i >= 4 ? 1 : 0;
+    if (setupPage === 0) { adjustSeqSetup(i, delta); return; }
+    if (setupPage === 1) {
+        const keys = ['step_note','step_velocity','step_gate','step_micro','step_tie','step_accent','step_probability','step_retrig'];
+        const labels = ['Note','Velocity','Gate','Microtiming','Tie','Accent','Probability','Retrig'];
+        const values = [stepNote,stepVelocity,stepGate,stepMicro,stepTie,stepAccent,stepProbability,stepRetrig];
+        const min = [-1,1,1,-23,0,0,0,1], max = [127,127,127,23,1,127,127,8];
+        const next = i === 4 ? (stepTie ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+        setSetupValue(keys[i], next, labels[i]);
+        return;
+    }
+    if (setupPage === 2) {
+        const keys = ['arp_enabled','arp_latch','arp_mode','arp_rate','arp_octaves','arp_gate','arp_length'];
+        const labels = ['Arpeggiator','Latch','Mode','Rate','Octaves','Gate','Length'];
+        const values = [arpEnabled,arpLatch,arpMode,arpRate,arpOctaves,arpGate,arpLength];
+        const min = [0,0,0,0,1,1,1], max = [1,1,5,7,4,127,16];
+        if (i < 7) {
+            const next = i < 2 ? (values[i] ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+            setSetupValue(keys[i], next, labels[i]);
+        } else {
+            const next = shiftActive() ? Math.max(0, Math.min(127, arpVelocity + delta))
+                : Math.max(-24, Math.min(24, arpOffsets[setupIndex] + delta));
+            if (shiftActive()) setSetupValue('arp_velocity', next, 'Arp velocity');
+            else setSetupValue('arp_offset', `${setupIndex}:${next}`, `Arp step ${setupIndex + 1}`);
+        }
+        return;
+    }
+    if (setupPage === 3) {
+        const keys = ['route_mode','route_amount','track_fx_type','track_fx_amount','track_fx_tone','track_fx_feedback','track_fx_mix','track_level'];
+        const labels = ['Route','Route amount','Track effect','Effect amount','Tone','Feedback','Mix','Level'];
+        const values = [routeMode,routeAmount,trackFxType,trackFxAmount,trackFxTone,trackFxFeedback,trackFxMix,trackLevel];
+        const max = [4,127,6,127,127,127,127,127];
+        setSetupValue(keys[i], Math.max(0, Math.min(max[i], values[i] + delta)), labels[i]);
+        return;
+    }
+    const keys = ['song_enabled','song_length','song_edit_row','song_start','song_row_length','song_repeats','song_transpose'];
+    const labels = ['Song mode','Song rows','Edit row','Row start','Row length','Repeats','Transpose'];
+    const values = [songEnabled,songLength,songEditRow,songStart,songRowLength,songRepeats,songTranspose];
+    const min = [0,1,0,0,1,1,-24], max = [1,16,15,63,64,16,24];
+    if (i < 7) {
+        const next = i === 0 ? (songEnabled ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+        setSetupValue(keys[i], next, labels[i]);
+    }
 }
 
 function cycleMachine(delta) {
@@ -576,12 +666,24 @@ function paintSteps(force) {
     for (let i = 0; i < 16; i++) {
         const absolute = stepPage * 16 + i;
         if (seqSetup) {
-            const shownStart = focusBank && !trackFollow ? trackStart : patternStart;
-            const shownLen = focusBank && !trackFollow ? trackLen : patternLen;
-            const inWindow = absolute >= shownStart && absolute < shownStart + shownLen;
-            let c = inWindow ? Green : 0x10;
-            if (absolute === shownStart) c = White;
-            if (absolute === playStep) c = BrightRed;
+            let c = Black;
+            if (setupPage === 0) {
+                const shownStart = focusBank && !trackFollow ? trackStart : patternStart;
+                const shownLen = focusBank && !trackFollow ? trackLen : patternLen;
+                const inWindow = absolute >= shownStart && absolute < shownStart + shownLen;
+                c = inWindow ? Green : 0x10;
+                if (absolute === shownStart) c = White;
+                if (absolute === playStep) c = BrightRed;
+            } else if (setupPage === 1) {
+                c = steps[i] ? Purple : 0x10;
+                if (absolute === editStep) c = White;
+            } else if (setupPage === 2) {
+                c = i < arpLength ? (arpOffsets[i] ? Purple : Green) : 0x10;
+                if (i === setupIndex) c = White;
+            } else if (setupPage === 4) {
+                c = i < songLength ? Green : 0x10;
+                if (i === songEditRow) c = White;
+            }
             setLED(STEP_FIRST + i, c, force);
             continue;
         }
@@ -633,22 +735,48 @@ function drawPresetBrowser() {
 
 function drawSeqSetup() {
     clear_screen();
-    drawHeader(`MONO · ${focusBank ? `T${track + 1} TIMING` : 'GLOBAL SEQ'}`);
-    const labels = ['START', 'LENGTH', 'ORDER', 'SWING', 'TSTART', 'TLEN', 'ROTATE', 'DIV'];
-    const shown = [String(patternStart + 1).padStart(2, '0'),
-        String(patternLen).padStart(2, '0'), PLAY_ORDER_SCREEN[playOrder],
-        `${50 + Math.round(swing * 25 / 127)}%`,
-        trackFollow ? 'GLOBAL' : String(trackStart + 1).padStart(2, '0'),
-        trackFollow ? 'GLOBAL' : String(trackLen).padStart(2, '0'),
-        String(trackRotate).padStart(2, '0'), `1/${trackDiv}`];
+    drawHeader(`MONO · ${SETUP_PAGES[setupPage]}`);
+    let labels, shown, footerLeft, footerRight;
+    if (setupPage === 0) {
+        labels = ['START', 'LENGTH', 'ORDER', 'SWING', 'TSTART', 'TLEN', 'ROTATE', 'DIV'];
+        shown = [String(patternStart + 1).padStart(2, '0'), String(patternLen).padStart(2, '0'),
+            PLAY_ORDER_SCREEN[playOrder], `${50 + Math.round(swing * 25 / 127)}%`,
+            trackFollow ? 'GLOBAL' : String(trackStart + 1).padStart(2, '0'),
+            trackFollow ? 'GLOBAL' : String(trackLen).padStart(2, '0'),
+            String(trackRotate).padStart(2, '0'), `1/${trackDiv}`];
+        footerLeft = focusBank ? 'Shift+turn: global' : `END ${String(patternStart + patternLen).padStart(2, '0')}`;
+        footerRight = `K${focusBank * 4 + 1}-${focusBank * 4 + 4} · Step=start`;
+    } else if (setupPage === 1) {
+        labels = ['NOTE','VEL','GATE','MICRO','TIE','ACCNT','PROB','RTRIG'];
+        shown = [stepNote < 0 ? 'OFF' : noteName(stepNote), `${stepVelocity}`, `${stepGate}`,
+            `${stepMicro >= 0 ? '+' : ''}${stepMicro}`, stepTie ? 'ON' : 'OFF', `${stepAccent}`,
+            `${Math.round(stepProbability * 100 / 127)}%`, `${stepRetrig}`];
+        footerLeft = `STEP ${String(editStep + 1).padStart(2, '0')}`; footerRight = 'Pads select step';
+    } else if (setupPage === 2) {
+        labels = ['ARP','LATCH','MODE','RATE','OCT','GATE','LEN',shiftLayer() ? 'VELOC' : 'OFFSET'];
+        shown = [arpEnabled ? 'ON' : 'OFF', arpLatch ? 'ON' : 'OFF', ARP_MODE_SCREEN[arpMode],
+            ARP_RATE_SCREEN[arpRate], `${arpOctaves}`, `${arpGate}`, `${arpLength}`,
+            shiftLayer() ? (arpVelocity ? `${arpVelocity}` : 'PLAY') : `${arpOffsets[setupIndex] >= 0 ? '+' : ''}${arpOffsets[setupIndex]}`];
+        footerLeft = `ARP STEP ${String(setupIndex + 1).padStart(2, '0')}`; footerRight = 'Pads select · Shift K8 velocity';
+    } else if (setupPage === 3) {
+        labels = ['ROUTE','RAMT','FX','FAMT','TONE','FDBK','MIX','LEVEL'];
+        shown = [ROUTE_SCREEN[routeMode], `${routeAmount}`, TRACK_FX_SCREEN[trackFxType], `${trackFxAmount}`,
+            `${trackFxTone}`, `${trackFxFeedback}`, `${trackFxMix}`, `${trackLevel}`];
+        footerLeft = `T${track + 1} · FROM T${track || '-'}`; footerRight = 'Neighbor then track FX';
+    } else {
+        labels = ['SONG','ROWS','EDIT','START','LEN','REPEAT','TRANS','PLAY'];
+        shown = [songEnabled ? 'ON' : 'OFF', `${songLength}`, `${songEditRow + 1}`,
+            `${songStart + 1}`, `${songRowLength}`, `${songRepeats}`,
+            `${songTranspose >= 0 ? '+' : ''}${songTranspose}`, `${parseInt(gp('song_play_row') || '0', 10) + 1}`];
+        footerLeft = `ROW ${songEditRow + 1}`; footerRight = 'Pads select row';
+    }
     const first = focusBank * 4;
     for (let column = 0; column < 4; column++) {
         const i = first + column, x = column * 32 + 2;
         print(x, 18, labels[i], 1);
         print(x, 34, shown[i], 1);
     }
-    drawFooter({left: focusBank ? 'Shift+turn: global' : `END ${String(patternStart + patternLen).padStart(2, '0')}`,
-                right: `K${first + 1}-${first + 4} · Step=start`});
+    drawFooter({left: footerLeft, right: footerRight});
     needsRedraw = false;
 }
 
@@ -692,10 +820,11 @@ globalThis.onMidiMessageInternal = function(data) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
         if (seqSetup) {
             if (d1 === MoveBack && d2 > 0) { closeSeqSetup(); return; }
+            if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setSetupPage(setupPage + d); return; }
             if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
             if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
             if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) {
-                const d = decodeDelta(d2); if (d) adjustSeqSetup(d1 - MoveKnob1, d); return;
+                const d = decodeDelta(d2); if (d) adjustSetup(d1 - MoveKnob1, d); return;
             }
             return;
         }
@@ -799,9 +928,20 @@ globalThis.onMidiMessageInternal = function(data) {
                 selectTrack(i); focusBank = 1; needsRedraw = true; return;
             }
             if (d1 >= STEP_FIRST && d1 < STEP_FIRST + STEP_COUNT) {
-                const start = stepPage * 16 + d1 - STEP_FIRST;
-                if (focusBank) setTrackTiming('track_start', start, 'Track start');
-                else setPatternStart(start);
+                const local = d1 - STEP_FIRST;
+                const absolute = stepPage * 16 + local;
+                if (setupPage === 0) {
+                    if (focusBank) setTrackTiming('track_start', absolute, 'Track start');
+                    else setPatternStart(absolute);
+                } else if (setupPage === 1) {
+                    host_module_set_param('edit_step', `${absolute}`); editStep = absolute;
+                    fetchAll(); paintSteps(false); needsRedraw = true; announce(`Edit step ${absolute + 1}`);
+                } else if (setupPage === 2) {
+                    setupIndex = local; paintSteps(false); needsRedraw = true; announce(`Arp step ${local + 1}`);
+                } else if (setupPage === 4) {
+                    setupIndex = local; host_module_set_param('song_edit_row', `${local}`);
+                    fetchAll(); paintSteps(false); needsRedraw = true; announce(`Song row ${local + 1}`);
+                }
                 return;
             }
             if (d1 === PAD_TRANSPORT) {

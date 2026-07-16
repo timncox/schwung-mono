@@ -50,7 +50,10 @@
       "title": "Play Window",
       "lines": [
         "Shift + top pad 8",
-        "opens Seq Setup.",
+        "opens Setup.",
+        "Turn the jog for",
+        "Sequence, Step, Arp,",
+        "Routing, and Song.",
         "",
         "Knob 1: start.",
         "Knob 2: length.",
@@ -65,6 +68,40 @@
         "Orders are Forward,",
         "Reverse, Pendulum",
         "and Random."
+      ]
+    },
+    {
+      "title": "Arp and Routing",
+      "lines": [
+        "In Setup, choose",
+        "Arpeggiator.",
+        "Knobs set on, latch,",
+        "mode, rate, octaves,",
+        "gate and length.",
+        "Tap a step then turn",
+        "knob 8 for its offset.",
+        "Shift + knob 8 sets",
+        "fixed velocity.",
+        "",
+        "Routing mixes the",
+        "previous track before",
+        "filter and track FX."
+      ]
+    },
+    {
+      "title": "Step and Song",
+      "lines": [
+        "Step Detail adds",
+        "microtiming, tie,",
+        "accent, probability",
+        "and retrigs.",
+        "",
+        "Song Mode chains 16",
+        "step windows. Each",
+        "row has start, length,",
+        "repeats and transpose.",
+        "Tap a step key to",
+        "select a song row."
       ]
     },
     {

@@ -3,7 +3,7 @@
   "name": "Mono",
   "abbrev": "MONO",
   "version": "0.2.0",
-  "description": "Six-track digital machine synth with a performance lock sequencer",
+  "description": "Six-track machine synth with locks, arp, neighbor routing and song mode",
   "dsp": "dsp.so",
   "ui": "ui.js",
   "api_version": 2,

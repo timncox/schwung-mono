@@ -12,7 +12,9 @@
 
 #define MONO_WAVES 32
 #define MONO_WAVE_LEN 512
+#define MONO_FACTORY_WAVES (MONO_WAVES - MONO_USER_WAVES)
 #define MONO_DELAY_SECONDS 2
+#define MONO_TRACK_FX_SECONDS 1
 #define MONO_CONTROL_INTERVAL 8
 
 enum {
@@ -67,9 +69,51 @@ typedef struct {
     uint8_t retrig;
     uint8_t condition;
     uint8_t slide;
+    int8_t micro;
+    uint8_t tie;
+    uint8_t accent;
     uint64_t lock_mask[MONO_LOCK_WORDS];
     uint8_t lock_values[MONO_PARAMS];
 } mono_step_t;
+
+typedef struct {
+    uint8_t enabled;
+    uint8_t latch;
+    uint8_t mode;
+    uint8_t rate;
+    uint8_t octaves;
+    uint8_t gate;
+    uint8_t length;
+    uint8_t velocity;
+    int8_t offset[MONO_ARP_STEPS];
+} mono_arp_settings_t;
+
+typedef struct {
+    uint8_t route_mode;
+    uint8_t route_amount;
+    uint8_t fx_type;
+    uint8_t fx_amount;
+    uint8_t fx_tone;
+    uint8_t fx_feedback;
+    uint8_t fx_mix;
+    uint8_t level;
+} mono_route_settings_t;
+
+typedef struct {
+    uint8_t start;
+    uint8_t length;
+    uint8_t repeats;
+    int8_t transpose;
+} mono_song_row_t;
+
+typedef struct {
+    int step;
+    int frames;
+    uint32_t cycle;
+    int transpose;
+    uint8_t valid;
+    uint8_t early;
+} mono_seq_event_t;
 
 typedef struct {
     mono_machine_t machine;
@@ -84,6 +128,13 @@ typedef struct {
     int seq_len;
     int seq_rotation;
     int seq_division;
+    mono_arp_settings_t arp;
+    mono_route_settings_t route;
+    uint8_t morph_a[MONO_PARAMS];
+    uint8_t morph_b[MONO_PARAMS];
+    uint8_t morph_valid;
+    uint8_t morph_value;
+    uint8_t morph_machine;
 } mono_track_edit_t;
 
 typedef struct {
@@ -91,6 +142,9 @@ typedef struct {
     int pattern_len;
     int play_order;
     int swing;
+    int song_enabled;
+    int song_length;
+    mono_song_row_t song[MONO_SONG_ROWS];
     mono_track_edit_t track[MONO_MAX_TRACKS];
 } mono_edit_snapshot_t;
 
@@ -110,12 +164,25 @@ typedef struct {
     int seq_len;
     int seq_rotation;
     int seq_division;
+    mono_arp_settings_t arp;
+    mono_route_settings_t route;
+    uint8_t morph_a[MONO_PARAMS];
+    uint8_t morph_b[MONO_PARAMS];
+    uint8_t morph_valid;
+    uint8_t morph_value;
+    uint8_t morph_machine;
     int seq_cursor;
     int seq_direction;
     int seq_div_counter;
     int play_step;
     uint32_t seq_rng;
     uint32_t seq_due_count;
+    int queued_cursor;
+    int queued_direction;
+    uint32_t queued_cycle;
+    int queued_valid;
+    int early_fired_step;
+    mono_seq_event_t seq_event[2];
 
     int note;
     int last_note;
@@ -123,6 +190,7 @@ typedef struct {
     uint8_t held_notes[128];
     uint8_t held_velocity[128];
     uint32_t held_order[128];
+    uint8_t physical_notes[128];
     uint32_t note_order;
     int gate_left;
     float freq;
@@ -143,6 +211,10 @@ typedef struct {
     uint32_t voice_age_samples;
     uint32_t sid_lfsr;
     float sid_noise_clock;
+    double arp_frames;
+    int arp_cursor;
+    int arp_direction;
+    int arp_pattern_pos;
 
     mono_env_t amp;
     mono_env_t filter_env;
@@ -167,6 +239,14 @@ typedef struct {
     float delay_hp[2];
     float delay_hp_in[2];
     float delay_mod_phase;
+    float *track_fx_buffer;
+    int track_fx_pos;
+    float track_fx_phase;
+    float track_fx_env;
+    float track_fx_lp[2];
+    int track_fx_hold;
+    float track_fx_held[2];
+    uint32_t edit_rng;
 } mono_track_t;
 
 struct mono {
@@ -180,6 +260,13 @@ struct mono {
     int pattern_len;
     int play_order;
     int swing;
+    int song_enabled;
+    int song_length;
+    int song_edit_row;
+    int song_play_row;
+    int song_repeat;
+    int song_step_count;
+    mono_song_row_t song[MONO_SONG_ROWS];
     int edit_step;
     int transport;
     int record_locks;
@@ -201,6 +288,11 @@ struct mono {
     int render_peak;
     int lifetime_peak;
     uint32_t nonfinite_samples;
+    int calibration_mode;
+    int calibration_level;
+    double calibration_phase;
+    uint64_t calibration_frames;
+    uint32_t calibration_noise;
     mono_edit_snapshot_t *undo_snapshot;
     mono_edit_snapshot_t *swap_snapshot;
     int undo_valid;
@@ -218,10 +310,16 @@ struct mono {
     float filter_ratio[128];
     float lfo_key_rate[128][128];
     float wavetable[MONO_WAVES][MONO_WAVE_LEN];
+    uint8_t user_wave_mask;
+    int16_t wave_upload[MONO_WAVE_LEN];
+    uint8_t wave_upload_chunks;
+    int wave_upload_slot;
+    char user_wave_path[256];
     mono_track_t track[MONO_MAX_TRACKS];
 };
 
 static void sync_smoothed(mono_track_t *t);
+static void process_sequence_events(mono_t *m, mono_track_t *t);
 
 static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
     out->machine = track->machine;
@@ -236,6 +334,13 @@ static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
     out->seq_len = track->seq_len;
     out->seq_rotation = track->seq_rotation;
     out->seq_division = track->seq_division;
+    out->arp = track->arp;
+    out->route = track->route;
+    memcpy(out->morph_a, track->morph_a, sizeof(out->morph_a));
+    memcpy(out->morph_b, track->morph_b, sizeof(out->morph_b));
+    out->morph_valid = track->morph_valid;
+    out->morph_value = track->morph_value;
+    out->morph_machine = track->morph_machine;
 }
 
 static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit) {
@@ -252,6 +357,13 @@ static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit)
     track->seq_len = edit->seq_len;
     track->seq_rotation = edit->seq_rotation;
     track->seq_division = edit->seq_division;
+    track->arp = edit->arp;
+    track->route = edit->route;
+    memcpy(track->morph_a, edit->morph_a, sizeof(track->morph_a));
+    memcpy(track->morph_b, edit->morph_b, sizeof(track->morph_b));
+    track->morph_valid = edit->morph_valid;
+    track->morph_value = edit->morph_value;
+    track->morph_machine = edit->morph_machine;
     sync_smoothed(track);
 }
 
@@ -260,6 +372,9 @@ static void fill_edit_snapshot(const mono_t *m, mono_edit_snapshot_t *snapshot) 
     snapshot->pattern_len = m->pattern_len;
     snapshot->play_order = m->play_order;
     snapshot->swing = m->swing;
+    snapshot->song_enabled = m->song_enabled;
+    snapshot->song_length = m->song_length;
+    memcpy(snapshot->song, m->song, sizeof(snapshot->song));
     for (int track = 0; track < m->track_count; ++track)
         copy_track_edit(&snapshot->track[track], &m->track[track]);
 }
@@ -286,6 +401,12 @@ static int step_has_any_lock(const mono_step_t *s) {
     for (int word = 0; word < MONO_LOCK_WORDS; ++word)
         if (s->lock_mask[word]) return 1;
     return 0;
+}
+
+static int step_has_all_locks(const mono_step_t *s) {
+    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+        if (!step_has_lock(s, pid)) return 0;
+    return 1;
 }
 
 static void step_set_lock(mono_step_t *s, int pid) {
@@ -526,6 +647,79 @@ static void generate_wavetables(mono_t *m) {
     }
 }
 
+typedef struct {
+    char magic[8];
+    uint32_t version;
+    uint32_t mask;
+    int16_t samples[MONO_USER_WAVES][MONO_WAVE_LEN];
+} mono_wave_bank_file_t;
+
+static void load_user_waves(mono_t *m) {
+    if (!m || !m->user_wave_path[0]) return;
+    FILE *file = fopen(m->user_wave_path, "rb");
+    if (!file) return;
+    mono_wave_bank_file_t *bank = malloc(sizeof(*bank));
+    if (!bank) { fclose(file); return; }
+    int ok = fread(bank, sizeof(*bank), 1, file) == 1 &&
+             !memcmp(bank->magic, "MONOWAV1", 8) && bank->version == 1;
+    fclose(file);
+    if (ok) {
+        m->user_wave_mask = (uint8_t)(bank->mask & 0xffu);
+        for (int slot = 0; slot < MONO_USER_WAVES; ++slot) {
+            if (!(m->user_wave_mask & (1u << slot))) continue;
+            float peak = 1.0e-6f;
+            for (int i = 0; i < MONO_WAVE_LEN; ++i)
+                if (abs(bank->samples[slot][i]) > peak)
+                    peak = (float)abs(bank->samples[slot][i]);
+            for (int i = 0; i < MONO_WAVE_LEN; ++i)
+                m->wavetable[MONO_FACTORY_WAVES + slot][i] =
+                    bank->samples[slot][i] / peak;
+        }
+    }
+    free(bank);
+}
+
+static int save_user_waves(const mono_t *m) {
+    if (!m || !m->user_wave_path[0]) return 0;
+    mono_wave_bank_file_t *bank = calloc(1, sizeof(*bank));
+    if (!bank) return 0;
+    memcpy(bank->magic, "MONOWAV1", 8);
+    bank->version = 1;
+    bank->mask = m->user_wave_mask;
+    for (int slot = 0; slot < MONO_USER_WAVES; ++slot)
+        for (int i = 0; i < MONO_WAVE_LEN; ++i)
+            bank->samples[slot][i] = (int16_t)lrintf(fclamp(
+                m->wavetable[MONO_FACTORY_WAVES + slot][i], -1.0f, 1.0f) * 2047.0f);
+    char temporary[sizeof(m->user_wave_path) + 8];
+    int wrote = snprintf(temporary, sizeof(temporary), "%s.tmp", m->user_wave_path);
+    if (wrote <= 0 || wrote >= (int)sizeof(temporary)) { free(bank); return 0; }
+    FILE *file = fopen(temporary, "wb");
+    int ok = file && fwrite(bank, sizeof(*bank), 1, file) == 1;
+    if (file && fclose(file) != 0) ok = 0;
+    if (ok) ok = rename(temporary, m->user_wave_path) == 0;
+    else remove(temporary);
+    free(bank);
+    return ok;
+}
+
+static void commit_user_wave(mono_t *m, int slot) {
+    if (!m || slot < 0 || slot >= MONO_USER_WAVES) return;
+    float mean = 0.0f, peak = 1.0e-6f;
+    for (int i = 0; i < MONO_WAVE_LEN; ++i) mean += m->wave_upload[i];
+    mean /= MONO_WAVE_LEN;
+    for (int i = 0; i < MONO_WAVE_LEN; ++i) {
+        float centered = m->wave_upload[i] - mean;
+        if (fabsf(centered) > peak) peak = fabsf(centered);
+    }
+    for (int i = 0; i < MONO_WAVE_LEN; ++i) {
+        float normalized = (m->wave_upload[i] - mean) / peak;
+        m->wavetable[MONO_FACTORY_WAVES + slot][i] =
+            roundf(fclamp(normalized, -1.0f, 1.0f) * 2047.0f) / 2047.0f;
+    }
+    m->user_wave_mask |= (uint8_t)(1u << slot);
+    (void)save_user_waves(m);
+}
+
 static void clear_step(mono_step_t *s) {
     memset(s, 0, sizeof(*s));
     s->note = -1;
@@ -533,6 +727,19 @@ static void clear_step(mono_step_t *s) {
     s->gate = 100;
     s->probability = 127;
     s->retrig = 1;
+}
+
+static void performance_defaults(mono_track_t *t) {
+    memset(&t->arp, 0, sizeof(t->arp));
+    memset(&t->route, 0, sizeof(t->route));
+    t->arp.rate = 3; /* 1/16 */
+    t->arp.octaves = 1;
+    t->arp.gate = 92;
+    t->arp.length = MONO_ARP_STEPS;
+    t->route.level = 64;
+    t->morph_valid = 0;
+    t->morph_value = 0;
+    t->morph_machine = 0;
 }
 
 static void common_defaults(mono_track_t *t) {
@@ -600,6 +807,141 @@ static void recall_machine(mono_track_t *t, int machine) {
     remember_machine(t);
 }
 
+typedef struct {
+    const char *name;
+    uint8_t machine;
+    uint8_t synth[8];
+    uint8_t alt[4];
+    uint8_t attack, decay, release, distortion;
+    uint8_t filter_base, filter_width, resonance, delay_send;
+} mono_patch_def_t;
+
+/* Original factory-independent starting points. These are intentionally
+ * compact recipes rather than copied sound data. */
+static const mono_patch_def_t patch_library[] = {
+    {"Chrome Bass", 0, {92,18,18,42,26,10,0,52}, {24,28,64,0}, 0,42,22,28, 0,78,18,4},
+    {"Wide Current",0, {108,48,74,0,12,0,0,64}, {18,64,64,0}, 8,78,54,16, 0,122,8,18},
+    {"Hollow Wire",1, {88,24,28,0,76,52,127,64}, {82,34,8,0}, 0,50,30,20, 0,96,14,8},
+    {"PWM Basin",  1, {110,42,52,18,58,88,127,54}, {54,50,22,0}, 12,86,66,10, 0,118,6,20},
+    {"Glass Choir",2, {39,58,74,26,58,74,50,64}, {127,94,80,70}, 18,92,70,8, 0,127,4,28},
+    {"Just Fifths",2, {124,127,3,82,48,38,62,64}, {127,112,82,0}, 4,72,44,12, 0,112,10,16},
+    {"Arcade Lead",3, {68,36,127,36,42,0,76,64}, {12,8,14,0}, 0,48,24,34, 0,96,18,6},
+    {"Dust Pulse", 3, {38,84,0,110,0,0,52,52}, {30,24,4,22}, 2,62,34,48, 0,84,24,10},
+    {"Scan Bell",  4, {52,28,82,127,64,78,0,64}, {76,42,70,64}, 0,96,86,8, 0,127,4,26},
+    {"Circuit Reed",4, {24,76,48,0,0,64,0,60}, {12,28,58,64}, 4,68,46,22, 0,102,12,12},
+    {"Metal Key",  5, {72,64,48,104,84,90,106,64}, {66,24,54,16}, 0,76,50,14, 0,116,8,22},
+    {"Soft Operator",5,{56,64,6,70,56,28,40,64}, {64,0,34,0}, 12,98,74,4, 0,126,2,18}
+};
+
+#define MONO_PATCH_COUNT ((int)(sizeof(patch_library) / sizeof(patch_library[0])))
+
+static void invalidate_morph(mono_track_t *t) {
+    t->morph_valid = 0;
+    t->morph_value = 0;
+}
+
+static void initialize_track_sound(mono_track_t *t, int machine) {
+    common_defaults(t);
+    machine_defaults(t, (mono_machine_t)iclamp(machine, 0, MONO_MACHINE_COUNT - 1));
+    memcpy(t->effective, t->base, MONO_PARAMS);
+    memset(t->machine_valid, 0, sizeof(t->machine_valid));
+    remember_machine(t);
+    invalidate_morph(t);
+    sync_smoothed(t);
+}
+
+static void apply_library_patch(mono_track_t *t, int index) {
+    index = iclamp(index, 0, MONO_PATCH_COUNT - 1);
+    const mono_patch_def_t *patch = &patch_library[index];
+    initialize_track_sound(t, patch->machine);
+    memcpy(t->base, patch->synth, sizeof(patch->synth));
+    memcpy(t->base + MONO_ALT_BASE, patch->alt, sizeof(patch->alt));
+    t->base[8] = patch->attack;
+    t->base[10] = patch->decay;
+    t->base[11] = patch->release;
+    t->base[12] = patch->distortion;
+    t->base[16] = patch->filter_base;
+    t->base[17] = patch->filter_width;
+    t->base[19] = patch->resonance;
+    t->base[27] = patch->delay_send;
+    memcpy(t->effective, t->base, MONO_PARAMS);
+    remember_machine(t);
+    sync_smoothed(t);
+}
+
+static int random_between(uint32_t *rng, int low, int high) {
+    if (high <= low) return low;
+    return low + (int)(xrnd(rng) % (uint32_t)(high - low + 1));
+}
+
+static void randomize_track_sound(mono_track_t *t) {
+    int machine = t->machine;
+    initialize_track_sound(t, machine);
+    uint32_t *rng = &t->edit_rng;
+    for (int i = 0; i < 8; ++i) t->base[i] = (uint8_t)random_between(rng, 8, 119);
+    t->base[7] = (uint8_t)random_between(rng, 52, 76);
+    if (machine == MONO_SWAVE_PULSE) t->base[6] = (uint8_t)((xrnd(rng) & 1u) ? 127 : 0);
+    if (machine == MONO_SWAVE_ENSEMBLE)
+        for (int i = 0; i < 3; ++i) t->base[i] = (uint8_t)random_between(rng, 0, 127);
+    if (machine == MONO_SID_6581) {
+        t->base[2] = (uint8_t)((xrnd(rng) & 1u) ? 127 : 0);
+        t->base[3] = (uint8_t)(random_between(rng, 0, 4) * 25);
+        t->base[4] = (uint8_t)(random_between(rng, 0, 3) * 32);
+        t->base[5] = (uint8_t)((xrnd(rng) & 1u) ? 127 : 0);
+    } else if (machine == MONO_DIGIPRO_WAVE) {
+        t->base[0] = (uint8_t)random_between(rng, 0, 127);
+        t->base[3] = (uint8_t)((xrnd(rng) & 1u) ? 127 : 0);
+        t->base[4] = (uint8_t)(random_between(rng, 0, 2) * 64);
+    } else if (machine == MONO_FM_STATIC) {
+        t->base[0] = (uint8_t)(random_between(rng, 8, 26) * 4);
+        t->base[4] = (uint8_t)(random_between(rng, 8, 26) * 4);
+    }
+    for (int i = 0; i < 4; ++i)
+        t->base[MONO_ALT_BASE + i] = (uint8_t)random_between(rng, 0, 96);
+    t->base[8] = (uint8_t)random_between(rng, 0, 28);
+    t->base[10] = (uint8_t)random_between(rng, 30, 108);
+    t->base[11] = (uint8_t)random_between(rng, 12, 92);
+    t->base[12] = (uint8_t)random_between(rng, 0, 42);
+    t->base[16] = (uint8_t)random_between(rng, 0, 24);
+    t->base[17] = (uint8_t)random_between(rng, 70, 127);
+    t->base[18] = (uint8_t)random_between(rng, 0, 32);
+    t->base[19] = (uint8_t)random_between(rng, 0, 32);
+    t->base[27] = (uint8_t)random_between(rng, 0, 36);
+    memcpy(t->effective, t->base, MONO_PARAMS);
+    remember_machine(t);
+    sync_smoothed(t);
+}
+
+static void capture_morph_endpoint(mono_track_t *t, int endpoint) {
+    if (endpoint == 0) {
+        memcpy(t->morph_a, t->base, MONO_PARAMS);
+        t->morph_machine = (uint8_t)t->machine;
+        t->morph_valid |= 1;
+    } else {
+        if ((t->morph_valid & 1) && t->morph_machine != (uint8_t)t->machine)
+            t->morph_valid = 0;
+        memcpy(t->morph_b, t->base, MONO_PARAMS);
+        t->morph_machine = (uint8_t)t->machine;
+        t->morph_valid |= 2;
+    }
+}
+
+static void apply_morph(mono_track_t *t, int value) {
+    t->morph_value = (uint8_t)iclamp(value, 0, 127);
+    if (t->morph_valid != 3) return;
+    if (t->machine != (mono_machine_t)t->morph_machine)
+        machine_defaults(t, (mono_machine_t)t->morph_machine);
+    for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+        int next = is_smoothable_param(t, pid)
+            ? t->morph_a[pid] + ((int)t->morph_b[pid] - t->morph_a[pid]) * value / 127
+            : (value < 64 ? t->morph_a[pid] : t->morph_b[pid]);
+        t->base[pid] = (uint8_t)iclamp(next, 0,
+            is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127);
+        t->effective[pid] = t->base[pid];
+    }
+    remember_machine(t);
+}
+
 static void init_track(mono_track_t *t, int index, int delay_frames) {
     memset(t, 0, sizeof(*t));
     t->machine = MONO_SWAVE_SAW;
@@ -610,9 +952,13 @@ static void init_track(mono_track_t *t, int index, int delay_frames) {
     t->seq_division = 1;
     t->seq_cursor = -1;
     t->seq_direction = 1;
+    t->queued_cursor = -1;
+    t->queued_direction = 1;
+    t->early_fired_step = -1;
     t->play_step = -1;
     t->seq_rng = 0x9e3779b9u ^ (uint32_t)(index * 0x85ebca6bu);
     t->noise = 0x1234567u ^ (uint32_t)(index * 0x9e3779b9u);
+    t->edit_rng = 0xa511e9b3u ^ (uint32_t)(index * 0x27d4eb2du);
     t->sid_lfsr = (0x7ffff8u ^ (uint32_t)(index * 0x5bd1e995u)) & 0x7fffffu;
     if (!t->sid_lfsr) t->sid_lfsr = 0x7ffff8u;
     for (int i = 0; i < MONO_STEPS; ++i) clear_step(&t->steps[i]);
@@ -621,10 +967,20 @@ static void init_track(mono_track_t *t, int index, int delay_frames) {
     remember_machine(t);
     memcpy(t->effective, t->base, MONO_PARAMS);
     for (int i = 0; i < 3; ++i) t->lfo[i].rng = t->noise + (uint32_t)i * 7919u;
+    performance_defaults(t);
+    t->arp_direction = 1;
     t->delay = calloc((size_t)delay_frames * 2, sizeof(float));
+    int sample_rate = delay_frames / MONO_DELAY_SECONDS;
+    t->track_fx_buffer = calloc((size_t)MONO_TRACK_FX_SECONDS * sample_rate * 2,
+                                sizeof(float));
 }
 
 mono_t *mono_create(const host_api_v1_t *host, int track_count) {
+    return mono_create_with_storage(host, track_count, NULL);
+}
+
+mono_t *mono_create_with_storage(const host_api_v1_t *host, int track_count,
+                                 const char *user_wave_path) {
     mono_t *m = calloc(1, sizeof(*m));
     if (!m) return NULL;
     m->host = host;
@@ -640,20 +996,33 @@ mono_t *mono_create(const host_api_v1_t *host, int track_count) {
     m->pattern_len = 16;
     m->play_order = MONO_PLAY_FORWARD;
     m->swing = 0;
+    m->song_length = 1;
+    m->song_edit_row = 0;
+    for (int row = 0; row < MONO_SONG_ROWS; ++row) {
+        m->song[row].start = 0;
+        m->song[row].length = 16;
+        m->song[row].repeats = 1;
+        m->song[row].transpose = 0;
+    }
     m->edit_step = 0;
     m->seq_step = -1;
     m->seq_direction = 1;
     m->seq_rng = 0x51f15e5du;
     m->master = m->track_count > 1 ? 0.34f : 0.7f;
+    m->calibration_level = 32;
+    m->calibration_noise = 0x8f3a21b7u;
     m->smooth_coeff = 1.0f - expf(-MONO_CONTROL_INTERVAL /
                                   (0.030f * m->sample_rate));
     build_control_tables(m);
     generate_wavetables(m);
+    if (user_wave_path && *user_wave_path)
+        snprintf(m->user_wave_path, sizeof(m->user_wave_path), "%s", user_wave_path);
+    load_user_waves(m);
     int delay_frames = m->sample_rate * MONO_DELAY_SECONDS;
     for (int i = 0; i < m->track_count; ++i) {
         init_track(&m->track[i], i, delay_frames);
         m->track[i].smooth_coeff = m->smooth_coeff;
-        if (!m->track[i].delay) {
+        if (!m->track[i].delay || !m->track[i].track_fx_buffer) {
             mono_destroy(m);
             return NULL;
         }
@@ -663,7 +1032,10 @@ mono_t *mono_create(const host_api_v1_t *host, int track_count) {
 
 void mono_destroy(mono_t *m) {
     if (!m) return;
-    for (int i = 0; i < MONO_MAX_TRACKS; ++i) free(m->track[i].delay);
+    for (int i = 0; i < MONO_MAX_TRACKS; ++i) {
+        free(m->track[i].delay);
+        free(m->track[i].track_fx_buffer);
+    }
     free(m->undo_snapshot);
     free(m->swap_snapshot);
     free(m);
@@ -868,6 +1240,104 @@ static void track_trigger(mono_t *m, mono_track_t *t, int note,
     }
 }
 
+static int note_set_count(const uint8_t *notes) {
+    int count = 0;
+    for (int note = 0; note < 128; ++note) count += notes[note] != 0;
+    return count;
+}
+
+static void reset_arp_runtime(mono_track_t *t) {
+    t->arp_frames = 0.0;
+    t->arp_cursor = -1;
+    t->arp_direction = 1;
+    t->arp_pattern_pos = 0;
+}
+
+static double arp_interval_frames(const mono_t *m, const mono_track_t *t,
+                                  float bpm) {
+    static const float steps_per_beat[8] = {1, 2, 3, 4, 6, 8, 12, 16};
+    int rate = iclamp(t->arp.rate, 0, 7);
+    return m->sample_rate * 60.0 / (fmaxf(30.0f, bpm) * steps_per_beat[rate]);
+}
+
+static int arp_pick_note(mono_track_t *t) {
+    int notes[128], count = 0;
+    for (int note = 0; note < 128; ++note)
+        if (t->held_notes[note]) notes[count++] = note;
+    if (count == 0) return -1;
+    if (t->arp.mode == 4) { /* played order */
+        for (int i = 0; i < count - 1; ++i)
+            for (int j = i + 1; j < count; ++j)
+                if (t->held_order[notes[j]] < t->held_order[notes[i]]) {
+                    int swap = notes[i]; notes[i] = notes[j]; notes[j] = swap;
+                }
+    }
+    int octaves = iclamp(t->arp.octaves, 1, 4);
+    int total = count * octaves;
+    int position;
+    switch (t->arp.mode) {
+    case 1: /* down */
+        t->arp_cursor = t->arp_cursor < 0 ? total - 1 : (t->arp_cursor - 1 + total) % total;
+        position = t->arp_cursor;
+        break;
+    case 2: /* pendulum */
+        if (t->arp_cursor < 0) { t->arp_cursor = 0; t->arp_direction = 1; }
+        else if (total > 1) {
+            int next = t->arp_cursor + t->arp_direction;
+            if (next >= total) { t->arp_direction = -1; next = total - 2; }
+            else if (next < 0) { t->arp_direction = 1; next = 1; }
+            t->arp_cursor = next;
+        }
+        position = t->arp_cursor;
+        break;
+    case 3: /* random */
+        position = (int)(xrnd(&t->edit_rng) % (uint32_t)total);
+        t->arp_cursor = position;
+        break;
+    case 5: { /* converge low/high toward the center */
+        t->arp_cursor = (t->arp_cursor + 1) % total;
+        int half = t->arp_cursor / 2;
+        position = (t->arp_cursor & 1) ? total - 1 - half : half;
+        break;
+    }
+    default: /* up / played order */
+        t->arp_cursor = (t->arp_cursor + 1) % total;
+        position = t->arp_cursor;
+        break;
+    }
+    int source = notes[position % count];
+    int octave = position / count;
+    int length = iclamp(t->arp.length, 1, MONO_ARP_STEPS);
+    int offset = t->arp.offset[t->arp_pattern_pos % length];
+    t->arp_pattern_pos = (t->arp_pattern_pos + 1) % length;
+    if (!t->arp.velocity && t->held_velocity[source])
+        t->velocity = t->held_velocity[source];
+    return iclamp(source + octave * 12 + offset, 0, 127);
+}
+
+static void arp_tick(mono_t *m, mono_track_t *t, float bpm) {
+    if (!t->arp.enabled) return;
+    if (note_set_count(t->held_notes) == 0) {
+        t->arp_frames = 0.0;
+        return;
+    }
+    if (t->arp_frames > 0.0) {
+        t->arp_frames -= 1.0;
+        return;
+    }
+    double interval = arp_interval_frames(m, t, bpm);
+    int note = arp_pick_note(t);
+    if (note >= 0) {
+        int velocity = t->arp.velocity ? t->arp.velocity
+                                       : iclamp(t->velocity, 1, 127);
+        memcpy(t->effective, t->base, MONO_PARAMS);
+        track_trigger(m, t, note, velocity, 15, 0);
+        t->gate_left = (int)fmax(1.0, interval * fclamp(t->arp.gate / 127.0f,
+                                                        0.03f, 1.0f));
+    }
+    t->arp_frames += interval;
+}
+
 void mono_note_on(mono_t *m, int track, int note, int velocity) {
     if (!m || track < 0 || track >= m->track_count) return;
     mono_track_t *t = &m->track[track];
@@ -875,6 +1345,19 @@ void mono_note_on(mono_t *m, int track, int note, int velocity) {
      * notes. Stopped performance notes still start from the base patch. */
     if (!m->transport) memcpy(t->effective, t->base, MONO_PARAMS);
     note = iclamp(note, 0, 127);
+    if (t->arp.enabled) {
+        if (t->arp.latch && note_set_count(t->physical_notes) == 0) {
+            memset(t->held_notes, 0, sizeof(t->held_notes));
+            memset(t->held_order, 0, sizeof(t->held_order));
+            reset_arp_runtime(t);
+        }
+        t->physical_notes[note] = 1;
+        hold_note(t, note, velocity);
+        if (note_set_count(t->held_notes) == 1) reset_arp_runtime(t);
+        ++m->note_events;
+        changed(m);
+        return;
+    }
     hold_note(t, note, velocity);
     track_trigger(m, t, note, velocity, 15, 0);
     ++m->note_events;
@@ -884,6 +1367,27 @@ void mono_note_on(mono_t *m, int track, int note, int velocity) {
 void mono_note_off(mono_t *m, int track, int note) {
     if (!m || track < 0 || track >= m->track_count) return;
     mono_track_t *t = &m->track[track];
+    if (t->arp.enabled) {
+        if (note < 0) memset(t->physical_notes, 0, sizeof(t->physical_notes));
+        else if (note < 128) t->physical_notes[note] = 0;
+        if (!t->arp.latch) {
+            if (note < 0) {
+                memset(t->held_notes, 0, sizeof(t->held_notes));
+                memset(t->held_order, 0, sizeof(t->held_order));
+            } else if (note < 128) {
+                t->held_notes[note] = 0;
+                t->held_order[note] = 0;
+            }
+            if (note_set_count(t->held_notes) == 0) {
+                env_release(m, &t->amp, t->effective[11]);
+                t->note = -1;
+                t->gate_left = 0;
+                reset_arp_runtime(t);
+            }
+        }
+        changed(m);
+        return;
+    }
     if (note < 0) {
         memset(t->held_notes, 0, sizeof(t->held_notes));
         memset(t->held_order, 0, sizeof(t->held_order));
@@ -1293,8 +1797,78 @@ static float svf(mono_svf_t *s, float in, const mono_svf_coeff_t *c,
     return highpass ? high : low;
 }
 
+static void process_track_fx(mono_t *m, mono_track_t *t, float *left, float *right) {
+    int type = iclamp(t->route.fx_type, 0, 6);
+    float mix = pnorm(t->route.fx_mix);
+    float amount = pnorm(t->route.fx_amount);
+    float tone = pnorm(t->route.fx_tone);
+    float feedback = pnorm(t->route.fx_feedback) * 0.94f;
+    float dry_l = *left, dry_r = *right;
+    float wet_l = dry_l, wet_r = dry_r;
+    int frames = m->sample_rate * MONO_TRACK_FX_SECONDS;
+    phase_step(&t->track_fx_phase, 0.03f + 8.0f * amount, m->sample_rate);
+    if (type == 1 || type == 2 || type == 4) {
+        float mod = sinf(2.0f * (float)M_PI * t->track_fx_phase);
+        int delay;
+        if (type == 1) delay = (int)((0.006f + 0.018f * (0.5f + 0.5f * mod) * amount) * m->sample_rate);
+        else if (type == 2) delay = (int)((0.0005f + 0.006f * (0.5f + 0.5f * mod) * amount) * m->sample_rate);
+        else delay = (int)((0.055f + 0.34f * tone) * m->sample_rate);
+        delay = iclamp(delay, 1, frames - 1);
+        int read = t->track_fx_pos - delay;
+        if (read < 0) read += frames;
+        float dl = t->track_fx_buffer[read * 2];
+        float dr = t->track_fx_buffer[read * 2 + 1];
+        float damping = 0.03f + tone * 0.45f;
+        t->track_fx_lp[0] += damping * (dl - t->track_fx_lp[0]);
+        t->track_fx_lp[1] += damping * (dr - t->track_fx_lp[1]);
+        dl = t->track_fx_lp[0]; dr = t->track_fx_lp[1];
+        if (type == 1) {
+            wet_l = 0.65f * dry_l + 0.70f * dl;
+            wet_r = 0.65f * dry_r + 0.70f * dr;
+        } else if (type == 2) {
+            wet_l = dry_l + dl;
+            wet_r = dry_r + dr;
+        } else {
+            wet_l = dl;
+            wet_r = dr;
+        }
+        float write_fb = type == 1 ? feedback * 0.25f : feedback;
+        t->track_fx_buffer[t->track_fx_pos * 2] = dry_l + dl * write_fb;
+        t->track_fx_buffer[t->track_fx_pos * 2 + 1] = dry_r + dr * write_fb;
+    } else if (type == 3) {
+        float carrier = sinf(2.0f * (float)M_PI * t->track_fx_phase);
+        wet_l = dry_l * carrier;
+        wet_r = dry_r * carrier;
+    } else if (type == 5) {
+        float detector = fmaxf(fabsf(dry_l), fabsf(dry_r));
+        float coeff = detector > t->track_fx_env ? 0.12f : 0.0015f + tone * 0.01f;
+        t->track_fx_env += (detector - t->track_fx_env) * coeff;
+        float threshold = 0.55f - amount * 0.48f;
+        float gain = t->track_fx_env > threshold
+            ? threshold / fmaxf(t->track_fx_env, 1.0e-5f) : 1.0f;
+        wet_l = tanhf(dry_l * gain * (1.0f + amount * 5.0f));
+        wet_r = tanhf(dry_r * gain * (1.0f + amount * 5.0f));
+    } else if (type == 6) {
+        int hold = 1 + (int)(amount * 31.0f);
+        if (t->track_fx_hold-- <= 0) {
+            int bits = 4 + (int)lrintf(tone * 8.0f);
+            float levels = (float)((1u << bits) - 1u);
+            t->track_fx_held[0] = roundf(dry_l * levels) / levels;
+            t->track_fx_held[1] = roundf(dry_r * levels) / levels;
+            t->track_fx_hold = hold;
+        }
+        wet_l = t->track_fx_held[0]; wet_r = t->track_fx_held[1];
+    }
+    if (++t->track_fx_pos >= frames) t->track_fx_pos = 0;
+    float level = powf(2.0f, ((int)t->route.level - 64) / 32.0f);
+    *left = (dry_l + (wet_l - dry_l) * mix) * level;
+    *right = (dry_r + (wet_r - dry_r) * mix) * level;
+}
+
 static float render_track(mono_t *m, mono_track_t *t, float *right,
-                          float bpm, int control_tick) {
+                          float bpm, int control_tick,
+                          float neighbor_left, float neighbor_right) {
+    process_sequence_events(m, t);
     if (t->retrig_left > 0 && --t->retrig_countdown <= 0) {
         track_trigger(m, t, t->retrig_note, t->retrig_velocity,
                       t->retrig_mask, t->retrig_gate);
@@ -1390,7 +1964,17 @@ static float render_track(mono_t *m, mono_track_t *t, float *right,
                       pnorm(alt[4]) * 0.125f;
         freq *= powf(2.0f, drift / 12.0f);
     }
+    float neighbor = 0.5f * (neighbor_left + neighbor_right);
+    float route_amount = pnorm(t->route.route_amount);
+    if (t->route.route_mode == 4)
+        freq *= powf(2.0f, neighbor * route_amount * 2.0f);
     float x = oscillator(m, t, fclamp(freq, 1.0f, m->sample_rate * 0.45f));
+    if (t->route.route_mode == 1)
+        x = (x + neighbor * route_amount) / (1.0f + route_amount);
+    else if (t->route.route_mode == 2)
+        x = neighbor * route_amount;
+    else if (t->route.route_mode == 3)
+        x += (x * neighbor * 2.0f - x) * route_amount;
     if (t->voice_age_samples < UINT32_MAX) ++t->voice_age_samples;
 
     const uint8_t *ap = t->effective + 8;
@@ -1521,6 +2105,7 @@ static float render_track(mono_t *m, mono_track_t *t, float *right,
     float duck = 1.0f - pnorm(ex[4]) * aenv;
     left += dl * send * duck;
     *right += dr * send * duck;
+    process_track_fx(m, t, &left, right);
     memcpy(t->effective, targets, sizeof(targets));
     return left;
 }
@@ -1535,9 +2120,19 @@ static void reset_sequence_cursors(mono_t *m) {
         t->seq_div_counter = 0;
         t->play_step = -1;
         t->seq_due_count = 0;
+        t->queued_cursor = -1;
+        t->queued_direction = 1;
+        t->queued_cycle = 0;
+        t->queued_valid = 0;
+        t->early_fired_step = -1;
+        memset(t->seq_event, 0, sizeof(t->seq_event));
         t->retrig_left = 0;
         t->smooth_coeff = m->smooth_coeff;
+        reset_arp_runtime(t);
     }
+    m->song_play_row = 0;
+    m->song_repeat = 0;
+    m->song_step_count = 0;
 }
 
 static void apply_edit_snapshot(mono_t *m, const mono_edit_snapshot_t *snapshot) {
@@ -1545,6 +2140,9 @@ static void apply_edit_snapshot(mono_t *m, const mono_edit_snapshot_t *snapshot)
     m->pattern_len = snapshot->pattern_len;
     m->play_order = snapshot->play_order;
     m->swing = snapshot->swing;
+    m->song_enabled = snapshot->song_enabled;
+    m->song_length = snapshot->song_length;
+    memcpy(m->song, snapshot->song, sizeof(m->song));
     for (int track = 0; track < m->track_count; ++track)
         apply_track_edit(&m->track[track], &snapshot->track[track]);
     reset_sequence_cursors(m);
@@ -1594,15 +2192,150 @@ static int condition_allows(int condition, uint32_t cycle) {
     }
 }
 
+static int preview_track_cursor(mono_t *m, mono_track_t *t, int length,
+                                int cursor, int *direction) {
+    if (m->play_order == MONO_PLAY_REVERSE) {
+        if (--cursor < 0) cursor = length - 1;
+    } else if (m->play_order == MONO_PLAY_PENDULUM) {
+        if (length <= 1) cursor = 0;
+        else {
+            int next = cursor + *direction;
+            if (next >= length) { *direction = -1; next = length - 2; }
+            else if (next < 0) { *direction = 1; next = 1; }
+            cursor = next;
+        }
+    } else if (m->play_order == MONO_PLAY_RANDOM) {
+        cursor = (int)(xrnd(&t->seq_rng) % (uint32_t)length);
+    } else if (++cursor >= length) cursor = 0;
+    return cursor;
+}
+
+static void fire_sequence_step(mono_t *m, mono_track_t *t, int step_index,
+                               uint32_t cycle, int transpose) {
+    if (step_index < 0 || step_index >= MONO_STEPS) return;
+    mono_step_t *s = &t->steps[step_index];
+    t->play_step = step_index;
+    if (s->note < 0 && s->trig_mask == 0 && !step_has_any_lock(s)) return;
+    if (!condition_allows(s->condition, cycle) ||
+        (s->probability < 127 && (xrnd(&t->seq_rng) & 127u) >= s->probability))
+        return;
+    memcpy(t->effective, t->base, MONO_PARAMS);
+    for (int p = 0; p < MONO_PARAMS; ++p)
+        if (step_has_lock(s, p)) t->effective[p] = s->lock_values[p];
+    int note = s->note >= 0 ? iclamp(s->note + transpose, 0, 127) : -1;
+    int velocity = iclamp(s->velocity + (s->accent * 32) / 127, 1, 127);
+    if (s->tie && t->amp.stage != ENV_OFF) {
+        if (note >= 0) track_pitch(t, note, velocity);
+        float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
+        t->gate_left = (int)(frames_per_step * iclamp(t->seq_division, 1, 8) *
+                             fclamp(s->gate / 127.0f, 0.5f, 1.2f));
+    } else {
+        int mask = s->trig_mask ? s->trig_mask : (note >= 0 ? 15 : 0);
+        track_trigger(m, t, note, velocity, mask, s->gate);
+    }
+    float slide_seconds = s->slide ? 0.03f + m->time_2[s->slide] : 0.03f;
+    t->smooth_coeff = 1.0f - expf(-MONO_CONTROL_INTERVAL /
+                                  (slide_seconds * m->sample_rate));
+    int retrigs = s->tie ? 1 : iclamp(s->retrig, 1, 8);
+    if (retrigs > 1) {
+        float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
+        t->retrig_interval = (int)fmaxf(1.0f, frames_per_step / retrigs);
+        t->retrig_countdown = t->retrig_interval;
+        t->retrig_left = retrigs - 1;
+        t->retrig_note = note;
+        t->retrig_velocity = velocity;
+        t->retrig_mask = s->trig_mask ? s->trig_mask : (note >= 0 ? 15 : 0);
+        t->retrig_gate = s->gate;
+    } else t->retrig_left = 0;
+}
+
+static void queue_sequence_event(mono_t *m, mono_track_t *t, int step,
+                                 int frames, uint32_t cycle, int transpose,
+                                 int early) {
+    if (frames <= 0) {
+        if (early) t->early_fired_step = step;
+        fire_sequence_step(m, t, step, cycle, transpose);
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        if (t->seq_event[i].valid) continue;
+        t->seq_event[i].step = step;
+        t->seq_event[i].frames = frames;
+        t->seq_event[i].cycle = cycle;
+        t->seq_event[i].transpose = transpose;
+        t->seq_event[i].early = (uint8_t)(early != 0);
+        t->seq_event[i].valid = 1;
+        return;
+    }
+}
+
+static void process_sequence_events(mono_t *m, mono_track_t *t) {
+    for (int i = 0; i < 2; ++i) {
+        mono_seq_event_t *event = &t->seq_event[i];
+        if (!event->valid || --event->frames > 0) continue;
+        int step = event->step;
+        uint32_t cycle = event->cycle;
+        int transpose = event->transpose;
+        if (event->early) t->early_fired_step = step;
+        event->valid = 0;
+        fire_sequence_step(m, t, step, cycle, transpose);
+    }
+}
+
+static int flush_sequence_event_for_step(mono_t *m, mono_track_t *t, int step) {
+    for (int i = 0; i < 2; ++i) {
+        mono_seq_event_t *event = &t->seq_event[i];
+        if (!event->valid || event->step != step) continue;
+        uint32_t cycle = event->cycle;
+        int transpose = event->transpose;
+        event->valid = 0;
+        fire_sequence_step(m, t, step, cycle, transpose);
+        return 1;
+    }
+    return 0;
+}
+
+static void reset_track_sequence_positions(mono_t *m) {
+    m->seq_step = -1;
+    m->seq_direction = 1;
+    for (int ti = 0; ti < m->track_count; ++ti) {
+        mono_track_t *t = &m->track[ti];
+        t->seq_cursor = -1;
+        t->seq_direction = 1;
+        t->seq_div_counter = 0;
+        t->queued_valid = 0;
+        t->early_fired_step = -1;
+        memset(t->seq_event, 0, sizeof(t->seq_event));
+    }
+}
+
+static void advance_song_row(mono_t *m) {
+    if (!m->song_enabled) return;
+    mono_song_row_t *row = &m->song[iclamp(m->song_play_row, 0, m->song_length - 1)];
+    if (++m->song_repeat >= iclamp(row->repeats, 1, 16)) {
+        m->song_repeat = 0;
+        if (++m->song_play_row >= m->song_length) m->song_play_row = 0;
+    }
+    m->song_step_count = 0;
+    reset_track_sequence_positions(m);
+}
+
 void mono_advance_step(mono_t *m) {
     if (!m) return;
-    int first = m->pattern_start;
-    int end = first + m->pattern_len;
+    if (m->song_enabled && m->song_step_count >=
+        iclamp(m->song[m->song_play_row].length, 1, MONO_STEPS))
+        advance_song_row(m);
+    mono_song_row_t *song_row = &m->song[iclamp(m->song_play_row, 0, m->song_length - 1)];
+    int first = m->song_enabled ? song_row->start : m->pattern_start;
+    int active_len = m->song_enabled ? song_row->length : m->pattern_len;
+    first = iclamp(first, 0, MONO_STEPS - 1);
+    active_len = iclamp(active_len, 1, MONO_STEPS - first);
+    int end = first + active_len;
     if (m->seq_step < first || m->seq_step >= end) {
         if (m->play_order == MONO_PLAY_REVERSE)
             m->seq_step = end - 1;
         else if (m->play_order == MONO_PLAY_RANDOM)
-            m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)m->pattern_len);
+            m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)active_len);
         else {
             m->seq_step = first;
             m->seq_direction = 1;
@@ -1610,7 +2343,7 @@ void mono_advance_step(mono_t *m) {
     } else if (m->play_order == MONO_PLAY_REVERSE) {
         if (--m->seq_step < first) m->seq_step = end - 1;
     } else if (m->play_order == MONO_PLAY_PENDULUM) {
-        if (m->pattern_len <= 1) {
+        if (active_len <= 1) {
             m->seq_step = first;
         } else {
             int next = m->seq_step + m->seq_direction;
@@ -1624,46 +2357,59 @@ void mono_advance_step(mono_t *m) {
             m->seq_step = next;
         }
     } else if (m->play_order == MONO_PLAY_RANDOM) {
-        m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)m->pattern_len);
+        m->seq_step = first + (int)(xrnd(&m->seq_rng) % (uint32_t)active_len);
     } else {
         if (++m->seq_step >= end) m->seq_step = first;
     }
+    if (m->song_enabled) ++m->song_step_count;
+    int transpose = m->song_enabled ? song_row->transpose : 0;
     for (int ti = 0; ti < m->track_count; ++ti) {
         mono_track_t *t = &m->track[ti];
         int division = iclamp(t->seq_division, 1, 8);
         if (t->seq_div_counter++ % division) continue;
-        int track_start = t->seq_override ? t->seq_start : m->pattern_start;
-        int track_len = t->seq_override ? t->seq_len : m->pattern_len;
+        int track_start = t->seq_override ? t->seq_start : first;
+        int track_len = t->seq_override ? t->seq_len : active_len;
         track_start = iclamp(track_start, 0, MONO_STEPS - 1);
         track_len = iclamp(track_len, 1, MONO_STEPS - track_start);
-        int cursor = advance_track_cursor(m, t, track_len);
+        uint32_t cycle;
+        int cursor;
+        if (t->queued_valid) {
+            cursor = t->queued_cursor;
+            t->seq_cursor = cursor;
+            t->seq_direction = t->queued_direction;
+            cycle = t->queued_cycle;
+            t->queued_valid = 0;
+        } else {
+            cursor = advance_track_cursor(m, t, track_len);
+            cycle = t->seq_due_count++ / (uint32_t)track_len;
+        }
         int rotated = (cursor + t->seq_rotation) % track_len;
-        t->play_step = track_start + rotated;
-        mono_step_t *s = &t->steps[t->play_step];
-        uint32_t cycle = t->seq_due_count++ / (uint32_t)track_len;
-        if (s->note < 0 && s->trig_mask == 0 && !step_has_any_lock(s)) continue;
-        if (!condition_allows(s->condition, cycle) ||
-            (s->probability < 127 && (xrnd(&t->seq_rng) & 127u) >= s->probability))
-            continue;
-        memcpy(t->effective, t->base, MONO_PARAMS);
-        for (int p = 0; p < MONO_PARAMS; ++p)
-            if (step_has_lock(s, p)) t->effective[p] = s->lock_values[p];
-        track_trigger(m, t, s->note, s->velocity,
-                      s->trig_mask ? s->trig_mask : (s->note >= 0 ? 15 : 0), s->gate);
-        float slide_seconds = s->slide ? 0.03f + m->time_2[s->slide] : 0.03f;
-        t->smooth_coeff = 1.0f - expf(-MONO_CONTROL_INTERVAL /
-                                      (slide_seconds * m->sample_rate));
-        int retrigs = iclamp(s->retrig, 1, 8);
-        if (retrigs > 1) {
-            float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
-            t->retrig_interval = (int)fmaxf(1.0f, frames_per_step / retrigs);
-            t->retrig_countdown = t->retrig_interval;
-            t->retrig_left = retrigs - 1;
-            t->retrig_note = s->note;
-            t->retrig_velocity = s->velocity;
-            t->retrig_mask = s->trig_mask ? s->trig_mask : (s->note >= 0 ? 15 : 0);
-            t->retrig_gate = s->gate;
-        } else t->retrig_left = 0;
+        int step_index = track_start + rotated;
+        mono_step_t *s = &t->steps[step_index];
+        int frames_per_track_step = (int)(m->sample_rate * 60.0f /
+            (bpm_now(m) * 4.0f) * division);
+        if (flush_sequence_event_for_step(m, t, step_index))
+            t->early_fired_step = -1;
+        else if (t->early_fired_step == step_index) t->early_fired_step = -1;
+        else {
+            int delay = s->micro > 0 ? frames_per_track_step * s->micro / 48 : 0;
+            queue_sequence_event(m, t, step_index, delay, cycle, transpose, 0);
+        }
+
+        int next_direction = t->seq_direction;
+        int next_cursor = preview_track_cursor(m, t, track_len, cursor, &next_direction);
+        t->queued_cursor = next_cursor;
+        t->queued_direction = next_direction;
+        t->queued_cycle = t->seq_due_count++ / (uint32_t)track_len;
+        t->queued_valid = 1;
+        int next_rotated = (next_cursor + t->seq_rotation) % track_len;
+        int next_step = track_start + next_rotated;
+        mono_step_t *next = &t->steps[next_step];
+        if (next->micro < 0) {
+            int delay = frames_per_track_step + frames_per_track_step * next->micro / 48;
+            queue_sequence_event(m, t, next_step, delay, t->queued_cycle,
+                                 transpose, 1);
+        }
     }
 }
 
@@ -1677,7 +2423,10 @@ static void internal_clock_tick(mono_t *m, float bpm) {
         m->internal_frames = 0;
     }
     double frames_per_step = m->sample_rate * 60.0 / (bpm * 4.0);
-    int relative = m->seq_step - m->pattern_start;
+    int active_start = m->song_enabled
+        ? m->song[iclamp(m->song_play_row, 0, m->song_length - 1)].start
+        : m->pattern_start;
+    int relative = m->seq_step - active_start;
     float swing = 0.45f * pnorm(m->swing);
     frames_per_step *= (relative & 1) ? 1.0 - swing : 1.0 + swing;
     m->internal_frames += 1.0;
@@ -1697,14 +2446,56 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
         int control_tick = m->control_phase == 0;
         internal_clock_tick(m, bpm);
         float l = 0.0f, r = 0.0f;
+        float neighbor_l = 0.0f, neighbor_r = 0.0f;
         for (int t = 0; t < m->track_count; ++t) {
+            arp_tick(m, &m->track[t], bpm);
             float tr = 0.0f;
-            float tl = render_track(m, &m->track[t], &tr, bpm, control_tick);
+            float tl = render_track(m, &m->track[t], &tr, bpm, control_tick,
+                                    neighbor_l, neighbor_r);
+            neighbor_l = tl;
+            neighbor_r = tr;
             int audible = any_solo ? m->track[t].solo : !m->track[t].mute;
             if (audible) { l += tl; r += tr; }
         }
         l = tanhf(l * m->master);
         r = tanhf(r * m->master);
+        if (m->calibration_mode) {
+            float level = 0.25f * pnorm(m->calibration_level);
+            float signal = 0.0f;
+            switch (m->calibration_mode) {
+            case 1: /* 440 Hz reference sine */
+                signal = sinf(2.0f * (float)M_PI * (float)m->calibration_phase);
+                m->calibration_phase += 440.0 / m->sample_rate;
+                break;
+            case 2: { /* ten-second logarithmic 20 Hz to 20 kHz sweep */
+                double position = (m->calibration_frames %
+                    (uint64_t)(m->sample_rate * 10)) / (double)(m->sample_rate * 10);
+                double hz = 20.0 * pow(1000.0, position);
+                signal = sinf(2.0f * (float)M_PI * (float)m->calibration_phase);
+                m->calibration_phase += hz / m->sample_rate;
+                break;
+            }
+            case 3: /* sample-accurate impulse once per second */
+                signal = m->calibration_frames % (uint64_t)m->sample_rate == 0 ? 1.0f : 0.0f;
+                break;
+            case 4: /* deterministic white noise */
+                signal = ((int32_t)xrnd(&m->calibration_noise) / 2147483648.0f);
+                break;
+            case 5: /* polarity/channel test: alternate sides every second */
+                signal = sinf(2.0f * (float)M_PI * (float)m->calibration_phase);
+                m->calibration_phase += 1000.0 / m->sample_rate;
+                break;
+            default: break;
+            }
+            m->calibration_phase -= floor(m->calibration_phase);
+            signal *= level;
+            if (m->calibration_mode == 5) {
+                int side = (int)(m->calibration_frames / (uint64_t)m->sample_rate) & 1;
+                l = side ? 0.0f : signal;
+                r = side ? -signal : 0.0f;
+            } else l = r = signal;
+            ++m->calibration_frames;
+        }
         if (!isfinite(l)) {
             l = 0.0f;
             ++m->nonfinite_samples;
@@ -1733,7 +2524,10 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
     if (st == 0xF8) {
         m->external_clock = 1;
         m->external_clock_age = 0;
-        int relative = m->seq_step - m->pattern_start;
+        int active_start = m->song_enabled
+            ? m->song[iclamp(m->song_play_row, 0, m->song_length - 1)].start
+            : m->pattern_start;
+        int relative = m->seq_step - active_start;
         int swing_ticks = (int)lrintf(3.0f * pnorm(m->swing));
         int ticks = (relative & 1) ? 6 - swing_ticks : 6 + swing_ticks;
         if (m->transport && ++m->tick_in_step >= ticks) {
@@ -1809,6 +2603,7 @@ static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
     memset(t->held_notes, 0, sizeof(t->held_notes));
     memset(t->held_velocity, 0, sizeof(t->held_velocity));
     memset(t->held_order, 0, sizeof(t->held_order));
+    memset(t->physical_notes, 0, sizeof(t->physical_notes));
     t->note_order = 0;
     t->gate_left = 0;
     t->freq = 0.0f;
@@ -1839,9 +2634,30 @@ static void reset_track_runtime(mono_t *m, mono_track_t *t, int index) {
     memset(t->delay_hp, 0, sizeof(t->delay_hp));
     memset(t->delay_hp_in, 0, sizeof(t->delay_hp_in));
     t->delay_mod_phase = 0.0f;
+    t->seq_cursor = -1;
+    t->seq_direction = 1;
+    t->seq_div_counter = 0;
+    t->play_step = -1;
+    t->seq_due_count = 0;
+    t->queued_cursor = -1;
+    t->queued_direction = 1;
+    t->queued_cycle = 0;
+    t->queued_valid = 0;
+    t->early_fired_step = -1;
+    memset(t->seq_event, 0, sizeof(t->seq_event));
+    reset_arp_runtime(t);
     if (t->delay)
         memset(t->delay, 0,
                (size_t)m->sample_rate * MONO_DELAY_SECONDS * 2 * sizeof(float));
+    t->track_fx_pos = 0;
+    t->track_fx_phase = 0.0f;
+    t->track_fx_env = 0.0f;
+    memset(t->track_fx_lp, 0, sizeof(t->track_fx_lp));
+    t->track_fx_hold = 0;
+    memset(t->track_fx_held, 0, sizeof(t->track_fx_held));
+    if (t->track_fx_buffer)
+        memset(t->track_fx_buffer, 0,
+               (size_t)m->sample_rate * MONO_TRACK_FX_SECONDS * 2 * sizeof(float));
 }
 
 static int hex_digit(char c) {
@@ -1997,12 +2813,47 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
     unsigned seen_tracks = 0;
     while (p < end) {
         char record = *p++;
+        if (record == 'G') {
+            uint64_t enabled64, length64;
+            mono_song_row_t rows[MONO_SONG_ROWS];
+            if (version < 10 ||
+                !read_hex(&p, end, 2, &enabled64) || enabled64 > 1 ||
+                !read_hex(&p, end, 2, &length64) ||
+                length64 < 1 || length64 > MONO_SONG_ROWS) return 0;
+            for (int row = 0; row < MONO_SONG_ROWS; ++row) {
+                uint64_t start64, row_length64, repeats64, transpose64;
+                if (!read_hex(&p, end, 2, &start64) || start64 >= MONO_STEPS ||
+                    !read_hex(&p, end, 2, &row_length64) || row_length64 < 1 ||
+                    row_length64 > MONO_STEPS - start64 ||
+                    !read_hex(&p, end, 2, &repeats64) || repeats64 < 1 ||
+                    repeats64 > 16 ||
+                    !read_hex(&p, end, 2, &transpose64) || transpose64 > 48)
+                    return 0;
+                rows[row].start = (uint8_t)start64;
+                rows[row].length = (uint8_t)row_length64;
+                rows[row].repeats = (uint8_t)repeats64;
+                rows[row].transpose = (int8_t)((int)transpose64 - 24);
+            }
+            if (apply) {
+                m->song_enabled = (int)enabled64;
+                m->song_length = (int)length64;
+                memcpy(m->song, rows, sizeof(rows));
+            }
+            continue;
+        }
         uint64_t tr64;
         if (!read_hex(&p, end, 1, &tr64) || tr64 >= MONO_MAX_TRACKS) return 0;
         int tr = (int)tr64;
         if (record == 'T') {
             uint64_t machine64, override64 = 0, start64 = 0, len64 = 16;
             uint64_t rotation64 = 0, division64 = 1, mute64 = 0, solo64 = 0;
+            mono_arp_settings_t arp = {0};
+            mono_route_settings_t route = {0};
+            arp.rate = 3;
+            arp.octaves = 1;
+            arp.gate = 92;
+            arp.length = MONO_ARP_STEPS;
+            route.level = 64;
             uint8_t params[MONO_PARAMS];
             if (!read_hex(&p, end, 2, &machine64) ||
                 machine64 >= MONO_MACHINE_COUNT) return 0;
@@ -2017,6 +2868,41 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
             if (version >= 8 &&
                 (!read_hex(&p, end, 2, &mute64) || mute64 > 1 ||
                  !read_hex(&p, end, 2, &solo64) || solo64 > 1)) return 0;
+            if (version >= 10) {
+                uint64_t fields[8];
+                for (int i = 0; i < 8; ++i)
+                    if (!read_hex(&p, end, 2, &fields[i])) return 0;
+                if (fields[0] > 1 || fields[1] > 1 || fields[2] > 5 ||
+                    fields[3] > 7 || fields[4] < 1 || fields[4] > 4 ||
+                    fields[5] < 1 || fields[5] > 127 ||
+                    fields[6] < 1 || fields[6] > MONO_ARP_STEPS ||
+                    fields[7] > 127) return 0;
+                arp.enabled = (uint8_t)fields[0];
+                arp.latch = (uint8_t)fields[1];
+                arp.mode = (uint8_t)fields[2];
+                arp.rate = (uint8_t)fields[3];
+                arp.octaves = (uint8_t)fields[4];
+                arp.gate = (uint8_t)fields[5];
+                arp.length = (uint8_t)fields[6];
+                arp.velocity = (uint8_t)fields[7];
+                for (int i = 0; i < MONO_ARP_STEPS; ++i) {
+                    uint64_t offset64;
+                    if (!read_hex(&p, end, 2, &offset64) || offset64 > 48) return 0;
+                    arp.offset[i] = (int8_t)((int)offset64 - 24);
+                }
+                for (int i = 0; i < 8; ++i)
+                    if (!read_hex(&p, end, 2, &fields[i]) || fields[i] > 127)
+                        return 0;
+                if (fields[0] > 4 || fields[2] > 6) return 0;
+                route.route_mode = (uint8_t)fields[0];
+                route.route_amount = (uint8_t)fields[1];
+                route.fx_type = (uint8_t)fields[2];
+                route.fx_amount = (uint8_t)fields[3];
+                route.fx_tone = (uint8_t)fields[4];
+                route.fx_feedback = (uint8_t)fields[5];
+                route.fx_mix = (uint8_t)fields[6];
+                route.level = (uint8_t)fields[7];
+            }
             for (int i = 0; i < saved_params; ++i) {
                 uint64_t param;
                 if (!read_hex(&p, end, 2, &param) || param > 127) return 0;
@@ -2046,6 +2932,9 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                     t->seq_len = (int)len64;
                     t->seq_rotation = (int)rotation64;
                     t->seq_division = (int)division64;
+                    t->arp = arp;
+                    t->route = route;
+                    invalidate_morph(t);
                     remember_machine(t);
                     sync_smoothed(t);
                 }
@@ -2072,9 +2961,35 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
             }
             continue;
         }
+        if (record == 'A' || record == 'B') {
+            uint64_t machine64, value64;
+            uint8_t endpoint[MONO_PARAMS];
+            if (version < 10 ||
+                !read_hex(&p, end, 2, &machine64) ||
+                machine64 >= MONO_MACHINE_COUNT ||
+                !read_hex(&p, end, 2, &value64) || value64 > 127) return 0;
+            for (int pid = 0; pid < MONO_PARAMS; ++pid) {
+                uint64_t param64;
+                if (!read_hex(&p, end, 2, &param64) || param64 > 127 ||
+                    (is_lfo_destination_param(pid) &&
+                     param64 >= MONO_LFO_DESTINATIONS)) return 0;
+                endpoint[pid] = (uint8_t)param64;
+            }
+            if (apply && tr < m->track_count) {
+                mono_track_t *t = &m->track[tr];
+                memcpy(record == 'A' ? t->morph_a : t->morph_b,
+                       endpoint, sizeof(endpoint));
+                t->morph_valid |= record == 'A' ? 1 : 2;
+                t->morph_machine = (uint8_t)machine64;
+                t->morph_value = (uint8_t)value64;
+            }
+            continue;
+        }
         if (record == 'S') {
             uint64_t step64, note64, velocity64, gate64, trig64;
             uint64_t probability64 = 127, retrig64 = 1, condition64 = 0, slide64 = 0;
+            uint64_t micro64 = 24, tie64 = 0, accent64 = 0;
+            int dense_locks = 0;
             uint64_t mask[MONO_LOCK_WORDS] = {0};
             uint8_t lock_values[MONO_PARAMS] = {0};
             if (!read_hex(&p, end, 2, &step64) || step64 >= MONO_STEPS ||
@@ -2096,9 +3011,24 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 if ((behavior & 8) &&
                     (!read_hex(&p, end, 2, &slide64) || slide64 > 127)) return 0;
             }
+            if (version >= 10) {
+                if (p >= end) return 0;
+                int extended = state64_digit(*p++);
+                if (extended < 0 || extended > 15) return 0;
+                tie64 = (uint64_t)((extended & 2) != 0);
+                dense_locks = (extended & 8) != 0;
+                if ((extended & 1) &&
+                    (!read_hex(&p, end, 2, &micro64) || micro64 > 48)) return 0;
+                if ((extended & 4) &&
+                    (!read_hex(&p, end, 2, &accent64) || accent64 > 127)) return 0;
+            }
             if (version >= 5) {
-                if (!read_v5_mask(&p, end, mask) ||
-                    !read_v5_lock_values(&p, end, mask, lock_values)) return 0;
+                if (dense_locks) {
+                    for (int pid = 0; pid < MONO_PARAMS; ++pid)
+                        mask[pid / 64] |= UINT64_C(1) << (pid % 64);
+                    if (!read_v5_lock_values(&p, end, mask, lock_values)) return 0;
+                } else if (!read_v5_mask(&p, end, mask) ||
+                           !read_v5_lock_values(&p, end, mask, lock_values)) return 0;
             } else {
                 uint64_t legacy_mask;
                 int mask_digits = version >= 3 ? 16 : 14;
@@ -2127,6 +3057,9 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                 step->retrig = (uint8_t)retrig64;
                 step->condition = (uint8_t)condition64;
                 step->slide = (uint8_t)slide64;
+                step->micro = (int8_t)((int)micro64 - 24);
+                step->tie = (uint8_t)tie64;
+                step->accent = (uint8_t)accent64;
                 memcpy(step->lock_mask, mask, sizeof(mask));
                 memcpy(step->lock_values, lock_values, sizeof(lock_values));
             }
@@ -2152,7 +3085,7 @@ static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
     int version = json_int(json, "\"v\":", 0);
-    if (version < 2 || version > 9) return;
+    if (version < 2 || version > 10) return;
     int saved_params = version >= 5 ? MONO_PARAMS
         : (version >= 3 ? 64 : MONO_PRIMARY_PARAMS);
     int legacy_destinations = version < 4;
@@ -2166,6 +3099,15 @@ static void restore_state(mono_t *m, const char *json) {
             clear_step(&m->track[tr].steps[step]);
         reset_track_runtime(m, &m->track[tr], tr);
     }
+    m->song_enabled = 0;
+    m->song_length = 1;
+    m->song_edit_row = 0;
+    for (int row = 0; row < MONO_SONG_ROWS; ++row) {
+        m->song[row].start = 0;
+        m->song[row].length = 16;
+        m->song[row].repeats = 1;
+        m->song[row].transpose = 0;
+    }
     if (!compact_state_pass(m, data, end, version, saved_params,
                             legacy_destinations, 1)) return;
 
@@ -2174,6 +3116,9 @@ static void restore_state(mono_t *m, const char *json) {
     m->selected_page = iclamp(json_int(json, "\"page\":", 0),
                               0, MONO_PAGES - 1);
     m->step_page = iclamp(json_int(json, "\"step_page\":", 0), 0, 3);
+    m->edit_step = iclamp(json_int(json, "\"edit_step\":", 0), 0, MONO_STEPS - 1);
+    m->song_edit_row = iclamp(json_int(json, "\"song_edit_row\":", 0),
+                              0, MONO_SONG_ROWS - 1);
     m->pattern_start = iclamp(json_int(json, "\"pattern_start\":", 0),
                               0, MONO_STEPS - 1);
     m->pattern_len = iclamp(json_int(json, "\"pattern_len\":", 16),
@@ -2187,6 +3132,9 @@ static void restore_state(mono_t *m, const char *json) {
                              0.0f, 400.0f);
     m->transport = 0;
     m->record_locks = 0;
+    m->calibration_mode = 0;
+    m->calibration_phase = 0.0;
+    m->calibration_frames = 0;
     reset_sequence_cursors(m);
     m->tick_in_step = 0;
     m->external_clock = 0;
@@ -2258,6 +3206,29 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!strcmp(key, "swing")) { capture_undo(m); m->swing = iclamp(v, 0, 127); changed(m); return; }
     if (!strcmp(key, "bpm_override")) { m->bpm_override = fclamp(strtof(val, NULL), 0, 400); changed(m); return; }
     if (!strcmp(key, "master")) { m->master = fclamp(strtof(val, NULL) / 100.0f, 0, 2); changed(m); return; }
+    if (!strcmp(key, "calibration_mode")) {
+        m->calibration_mode = iclamp(v, 0, 5);
+        m->calibration_phase = 0.0;
+        m->calibration_frames = 0;
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "calibration_level")) {
+        m->calibration_level = iclamp(v, 0, 127);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "calibration_reset") && v) {
+        m->render_peak = 0;
+        m->lifetime_peak = 0;
+        m->render_blocks = 0;
+        m->nonzero_blocks = 0;
+        m->nonfinite_samples = 0;
+        m->calibration_phase = 0.0;
+        m->calibration_frames = 0;
+        changed(m);
+        return;
+    }
     if (!strcmp(key, "record")) { m->record_locks = v != 0; changed(m); return; }
     if (!strcmp(key, "transport")) {
         if (v && !m->transport) {
@@ -2275,6 +3246,152 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         return;
     }
     mono_track_t *t = &m->track[m->selected_track];
+    if (!strcmp(key, "patch_init") && v) {
+        capture_undo(m);
+        initialize_track_sound(t, t->machine);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "patch_load")) {
+        capture_undo(m);
+        apply_library_patch(t, v);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "patch_randomize") && v) {
+        capture_undo(m);
+        randomize_track_sound(t);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "morph_capture_a") && v) {
+        capture_undo(m);
+        capture_morph_endpoint(t, 0);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "morph_capture_b") && v) {
+        capture_undo(m);
+        capture_morph_endpoint(t, 1);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "morph")) {
+        capture_undo(m);
+        apply_morph(t, v);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "arp_enabled")) {
+        capture_undo(m);
+        t->arp.enabled = v != 0;
+        reset_arp_runtime(t);
+        if (!t->arp.enabled) {
+            memset(t->held_notes, 0, sizeof(t->held_notes));
+            t->note = -1;
+            env_release(m, &t->amp, t->effective[11]);
+        }
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "arp_latch")) {
+        capture_undo(m);
+        t->arp.latch = v != 0;
+        if (!t->arp.latch)
+            for (int note = 0; note < 128; ++note)
+                if (!t->physical_notes[note]) t->held_notes[note] = 0;
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "arp_mode")) { capture_undo(m); t->arp.mode = (uint8_t)iclamp(v, 0, 5); reset_arp_runtime(t); changed(m); return; }
+    if (!strcmp(key, "arp_rate")) { capture_undo(m); t->arp.rate = (uint8_t)iclamp(v, 0, 7); reset_arp_runtime(t); changed(m); return; }
+    if (!strcmp(key, "arp_octaves")) { capture_undo(m); t->arp.octaves = (uint8_t)iclamp(v, 1, 4); reset_arp_runtime(t); changed(m); return; }
+    if (!strcmp(key, "arp_gate")) { capture_undo(m); t->arp.gate = (uint8_t)iclamp(v, 1, 127); changed(m); return; }
+    if (!strcmp(key, "arp_length")) { capture_undo(m); t->arp.length = (uint8_t)iclamp(v, 1, MONO_ARP_STEPS); reset_arp_runtime(t); changed(m); return; }
+    if (!strcmp(key, "arp_velocity")) { capture_undo(m); t->arp.velocity = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "arp_offset")) {
+        int arp_step, offset;
+        if (sscanf(val, "%d:%d", &arp_step, &offset) == 2 &&
+            arp_step >= 0 && arp_step < MONO_ARP_STEPS) {
+            capture_undo(m);
+            t->arp.offset[arp_step] = (int8_t)iclamp(offset, -24, 24);
+            changed(m);
+        }
+        return;
+    }
+    if (!strcmp(key, "arp_clear") && v) {
+        memset(t->held_notes, 0, sizeof(t->held_notes));
+        memset(t->held_velocity, 0, sizeof(t->held_velocity));
+        memset(t->held_order, 0, sizeof(t->held_order));
+        t->note = -1;
+        env_release(m, &t->amp, t->effective[11]);
+        reset_arp_runtime(t);
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "route_mode")) { capture_undo(m); t->route.route_mode = (uint8_t)iclamp(v, 0, 4); changed(m); return; }
+    if (!strcmp(key, "route_amount")) { capture_undo(m); t->route.route_amount = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "track_fx_type")) { capture_undo(m); t->route.fx_type = (uint8_t)iclamp(v, 0, 6); changed(m); return; }
+    if (!strcmp(key, "track_fx_amount")) { capture_undo(m); t->route.fx_amount = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "track_fx_tone")) { capture_undo(m); t->route.fx_tone = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "track_fx_feedback")) { capture_undo(m); t->route.fx_feedback = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "track_fx_mix")) { capture_undo(m); t->route.fx_mix = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "track_level")) { capture_undo(m); t->route.level = (uint8_t)iclamp(v, 0, 127); changed(m); return; }
+    if (!strcmp(key, "song_enabled")) { capture_undo(m); m->song_enabled = v != 0; reset_sequence_cursors(m); changed(m); return; }
+    if (!strcmp(key, "song_length")) { capture_undo(m); m->song_length = iclamp(v, 1, MONO_SONG_ROWS); m->song_edit_row = iclamp(m->song_edit_row, 0, m->song_length - 1); reset_sequence_cursors(m); changed(m); return; }
+    if (!strcmp(key, "song_edit_row")) { m->song_edit_row = iclamp(v, 0, MONO_SONG_ROWS - 1); changed(m); return; }
+    mono_song_row_t *song_row = &m->song[m->song_edit_row];
+    if (!strcmp(key, "song_start")) { capture_undo(m); song_row->start = (uint8_t)iclamp(v, 0, MONO_STEPS - 1); song_row->length = (uint8_t)iclamp(song_row->length, 1, MONO_STEPS - song_row->start); reset_sequence_cursors(m); changed(m); return; }
+    if (!strcmp(key, "song_row_length")) { capture_undo(m); song_row->length = (uint8_t)iclamp(v, 1, MONO_STEPS - song_row->start); reset_sequence_cursors(m); changed(m); return; }
+    if (!strcmp(key, "song_repeats")) { capture_undo(m); song_row->repeats = (uint8_t)iclamp(v, 1, 16); reset_sequence_cursors(m); changed(m); return; }
+    if (!strcmp(key, "song_transpose")) { capture_undo(m); song_row->transpose = (int8_t)iclamp(v, -24, 24); changed(m); return; }
+    if (!strcmp(key, "wave_begin")) {
+        int slot = iclamp(v, 0, MONO_USER_WAVES - 1);
+        m->wave_upload_slot = slot;
+        m->wave_upload_chunks = 0;
+        memset(m->wave_upload, 0, sizeof(m->wave_upload));
+        changed(m);
+        return;
+    }
+    if (!strcmp(key, "wave_chunk")) {
+        int slot, offset, consumed = 0;
+        if (sscanf(val, "%d:%d:%n", &slot, &offset, &consumed) == 2 &&
+            slot == m->wave_upload_slot && offset >= 0 && offset < MONO_WAVE_LEN &&
+            offset % 64 == 0) {
+            const char *hex = val + consumed;
+            int samples = 0;
+            while (samples < 64 && offset + samples < MONO_WAVE_LEN &&
+                   hex[samples * 3] && hex[samples * 3 + 1] && hex[samples * 3 + 2]) {
+                const char *cursor = hex + samples * 3;
+                uint64_t encoded;
+                if (!read_hex(&cursor, cursor + 3, 3, &encoded)) return;
+                m->wave_upload[offset + samples] = (int16_t)((int)encoded - 2048);
+                ++samples;
+            }
+            if (samples == 64 && hex[samples * 3] == '\0') {
+                m->wave_upload_chunks |= (uint8_t)(1u << (offset / 64));
+                changed(m);
+            }
+        }
+        return;
+    }
+    if (!strcmp(key, "wave_commit")) {
+        int slot = iclamp(v, 0, MONO_USER_WAVES - 1);
+        if (slot == m->wave_upload_slot && m->wave_upload_chunks == 0xffu) {
+            commit_user_wave(m, slot);
+            changed(m);
+        }
+        return;
+    }
+    if (!strcmp(key, "wave_clear")) {
+        int slot = iclamp(v, 0, MONO_USER_WAVES - 1);
+        m->user_wave_mask &= (uint8_t)~(1u << slot);
+        (void)save_user_waves(m);
+        generate_wavetables(m);
+        load_user_waves(m);
+        changed(m);
+        return;
+    }
     if (!strcmp(key, "edit_step")) {
         m->edit_step = iclamp(v, 0, MONO_STEPS - 1); changed(m); return;
     }
@@ -2304,6 +3421,15 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     }
     if (!strcmp(key, "step_slide")) {
         capture_undo(m); edited_step->slide = (uint8_t)iclamp(v, 0, 127); changed(m); return;
+    }
+    if (!strcmp(key, "step_micro")) {
+        capture_undo(m); edited_step->micro = (int8_t)iclamp(v, -23, 23); changed(m); return;
+    }
+    if (!strcmp(key, "step_tie")) {
+        capture_undo(m); edited_step->tie = (uint8_t)(v != 0); changed(m); return;
+    }
+    if (!strcmp(key, "step_accent")) {
+        capture_undo(m); edited_step->accent = (uint8_t)iclamp(v, 0, 127); changed(m); return;
     }
     if (!strcmp(key, "track_follow")) {
         capture_undo(m);
@@ -2480,8 +3606,77 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "bpm")) return snprintf(buf, (size_t)buf_len, "%.1f", bpm_now(m));
     if (!strcmp(key, "bpm_override")) return snprintf(buf, (size_t)buf_len, "%.1f", m->bpm_override);
     if (!strcmp(key, "master")) return snprintf(buf, (size_t)buf_len, "%.0f", m->master * 100.0f);
+    if (!strcmp(key, "calibration_mode")) return snprintf(buf, (size_t)buf_len, "%d", m->calibration_mode);
+    if (!strcmp(key, "calibration_level")) return snprintf(buf, (size_t)buf_len, "%d", m->calibration_level);
+    if (!strcmp(key, "calibration_metrics"))
+        return snprintf(buf, (size_t)buf_len, "%u:%u:%d:%d:%u",
+                        m->render_blocks, m->nonzero_blocks, m->render_peak,
+                        m->lifetime_peak, m->nonfinite_samples);
     mono_track_t *t = &m->track[m->selected_track];
     mono_step_t *edited_step = &t->steps[m->edit_step];
+    if (!strcmp(key, "patch_count")) return snprintf(buf, (size_t)buf_len, "%d", MONO_PATCH_COUNT);
+    if (!strcmp(key, "patch_names")) {
+        int n = 0;
+        for (int i = 0; i < MONO_PATCH_COUNT; ++i) {
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%s",
+                                 i ? "|" : "", patch_library[i].name);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
+    if (!strcmp(key, "morph")) return snprintf(buf, (size_t)buf_len, "%d", t->morph_value);
+    if (!strcmp(key, "morph_valid")) return snprintf(buf, (size_t)buf_len, "%d", t->morph_valid);
+    if (!strcmp(key, "morph_status")) return snprintf(buf, (size_t)buf_len, "%d:%d:%d", t->morph_valid, t->morph_value, t->morph_machine);
+    if (!strcmp(key, "arp_enabled")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.enabled);
+    if (!strcmp(key, "arp_latch")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.latch);
+    if (!strcmp(key, "arp_mode")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.mode);
+    if (!strcmp(key, "arp_rate")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.rate);
+    if (!strcmp(key, "arp_octaves")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.octaves);
+    if (!strcmp(key, "arp_gate")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.gate);
+    if (!strcmp(key, "arp_length")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.length);
+    if (!strcmp(key, "arp_velocity")) return snprintf(buf, (size_t)buf_len, "%d", t->arp.velocity);
+    if (!strcmp(key, "arp_offsets")) {
+        int n = 0;
+        for (int i = 0; i < MONO_ARP_STEPS; ++i) {
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d",
+                                 i ? "," : "", t->arp.offset[i]);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
+    if (!strcmp(key, "route_mode")) return snprintf(buf, (size_t)buf_len, "%d", t->route.route_mode);
+    if (!strcmp(key, "route_amount")) return snprintf(buf, (size_t)buf_len, "%d", t->route.route_amount);
+    if (!strcmp(key, "track_fx_type")) return snprintf(buf, (size_t)buf_len, "%d", t->route.fx_type);
+    if (!strcmp(key, "track_fx_amount")) return snprintf(buf, (size_t)buf_len, "%d", t->route.fx_amount);
+    if (!strcmp(key, "track_fx_tone")) return snprintf(buf, (size_t)buf_len, "%d", t->route.fx_tone);
+    if (!strcmp(key, "track_fx_feedback")) return snprintf(buf, (size_t)buf_len, "%d", t->route.fx_feedback);
+    if (!strcmp(key, "track_fx_mix")) return snprintf(buf, (size_t)buf_len, "%d", t->route.fx_mix);
+    if (!strcmp(key, "track_level")) return snprintf(buf, (size_t)buf_len, "%d", t->route.level);
+    if (!strcmp(key, "user_wave_mask")) return snprintf(buf, (size_t)buf_len, "%d", m->user_wave_mask);
+    if (!strcmp(key, "wave_upload_status")) return snprintf(buf, (size_t)buf_len, "%d:%d", m->wave_upload_slot, m->wave_upload_chunks);
+    if (!strcmp(key, "song_enabled")) return snprintf(buf, (size_t)buf_len, "%d", m->song_enabled);
+    if (!strcmp(key, "song_length")) return snprintf(buf, (size_t)buf_len, "%d", m->song_length);
+    if (!strcmp(key, "song_edit_row")) return snprintf(buf, (size_t)buf_len, "%d", m->song_edit_row);
+    if (!strcmp(key, "song_play_row")) return snprintf(buf, (size_t)buf_len, "%d", m->song_play_row);
+    mono_song_row_t *song_row = &m->song[m->song_edit_row];
+    if (!strcmp(key, "song_start")) return snprintf(buf, (size_t)buf_len, "%d", song_row->start);
+    if (!strcmp(key, "song_row_length")) return snprintf(buf, (size_t)buf_len, "%d", song_row->length);
+    if (!strcmp(key, "song_repeats")) return snprintf(buf, (size_t)buf_len, "%d", song_row->repeats);
+    if (!strcmp(key, "song_transpose")) return snprintf(buf, (size_t)buf_len, "%d", song_row->transpose);
+    if (!strcmp(key, "song_rows")) {
+        int n = 0;
+        for (int row = 0; row < MONO_SONG_ROWS; ++row) {
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d:%d:%d:%d",
+                                 row ? ";" : "", m->song[row].start,
+                                 m->song[row].length, m->song[row].repeats,
+                                 m->song[row].transpose);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
     if (!strcmp(key, "edit_step")) return snprintf(buf, (size_t)buf_len, "%d", m->edit_step);
     if (!strcmp(key, "step_note")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->note);
     if (!strcmp(key, "step_velocity")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->velocity);
@@ -2491,6 +3686,9 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "step_retrig")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->retrig);
     if (!strcmp(key, "step_condition")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->condition);
     if (!strcmp(key, "step_slide")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->slide);
+    if (!strcmp(key, "step_micro")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->micro);
+    if (!strcmp(key, "step_tie")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->tie);
+    if (!strcmp(key, "step_accent")) return snprintf(buf, (size_t)buf_len, "%d", edited_step->accent);
     if (!strcmp(key, "track_follow")) return snprintf(buf, (size_t)buf_len, "%d", !t->seq_override);
     if (!strcmp(key, "track_start")) return snprintf(buf, (size_t)buf_len, "%d",
         t->seq_override ? t->seq_start : m->pattern_start);
@@ -2553,6 +3751,8 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         char step_csv[96];
         char all_step_csv[192];
         char track_state_csv[24];
+        char arp_offset_csv[80];
+        char song_row_csv[256];
         int sn = 0;
         int first = m->step_page * 16;
         for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
@@ -2580,10 +3780,26 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
             if (wrote < 0 || wrote >= (int)sizeof(track_state_csv) - tn) break;
             tn += wrote;
         }
+        int on = 0;
+        for (int i = 0; i < MONO_ARP_STEPS && on < (int)sizeof(arp_offset_csv); ++i) {
+            int wrote = snprintf(arp_offset_csv + on, sizeof(arp_offset_csv) - (size_t)on,
+                                 "%s%d", i ? "," : "", t->arp.offset[i]);
+            if (wrote < 0 || wrote >= (int)sizeof(arp_offset_csv) - on) break;
+            on += wrote;
+        }
+        int rn = 0;
+        for (int row = 0; row < MONO_SONG_ROWS && rn < (int)sizeof(song_row_csv); ++row) {
+            int wrote = snprintf(song_row_csv + rn, sizeof(song_row_csv) - (size_t)rn,
+                                 "%s%d:%d:%d:%d", row ? ";" : "",
+                                 m->song[row].start, m->song[row].length,
+                                 m->song[row].repeats, m->song[row].transpose);
+            if (wrote < 0 || wrote >= (int)sizeof(song_row_csv) - rn) break;
+            rn += wrote;
+        }
         int n = 0;
         int shift_base = MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":9,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":10,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_start\":%d,\"pattern_len\":%d,\"play_order\":%d,\"swing\":%d,"
                      "\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"track_follow\":%d,\"track_start\":%d,"
@@ -2592,6 +3808,18 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      "\"edit_step\":%d,\"step_note\":%d,\"step_velocity\":%d,"
                      "\"step_gate\":%d,\"step_trig\":%d,\"step_probability\":%d,"
                      "\"step_retrig\":%d,\"step_condition\":%d,\"step_slide\":%d,"
+                     "\"step_micro\":%d,\"step_tie\":%d,\"step_accent\":%d,"
+                     "\"arp_enabled\":%d,\"arp_latch\":%d,\"arp_mode\":%d,"
+                     "\"arp_rate\":%d,\"arp_octaves\":%d,\"arp_gate\":%d,"
+                     "\"arp_length\":%d,\"arp_velocity\":%d,\"arp_offsets\":\"%s\","
+                     "\"route_mode\":%d,\"route_amount\":%d,\"track_fx_type\":%d,"
+                     "\"track_fx_amount\":%d,\"track_fx_tone\":%d,"
+                     "\"track_fx_feedback\":%d,\"track_fx_mix\":%d,\"track_level\":%d,"
+                     "\"morph_valid\":%d,\"morph\":%d,\"user_wave_mask\":%d,"
+                     "\"song_enabled\":%d,\"song_length\":%d,\"song_edit_row\":%d,"
+                     "\"song_start\":%d,\"song_row_length\":%d,\"song_repeats\":%d,"
+                     "\"song_transpose\":%d,\"song_rows\":\"%s\","
+                     "\"calibration_mode\":%d,\"calibration_level\":%d,"
                      "\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,"
                      "\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,"
                      "\"alt1\":%d,\"alt2\":%d,\"alt3\":%d,\"alt4\":%d,"
@@ -2610,6 +3838,21 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      edited_step->gate, edited_step->trig_mask,
                      edited_step->probability, edited_step->retrig,
                      edited_step->condition, edited_step->slide,
+                     edited_step->micro, edited_step->tie, edited_step->accent,
+                     t->arp.enabled, t->arp.latch, t->arp.mode, t->arp.rate,
+                     t->arp.octaves, t->arp.gate, t->arp.length, t->arp.velocity,
+                     arp_offset_csv,
+                     t->route.route_mode, t->route.route_amount, t->route.fx_type,
+                     t->route.fx_amount, t->route.fx_tone, t->route.fx_feedback,
+                     t->route.fx_mix, t->route.level,
+                     t->morph_valid, t->morph_value, m->user_wave_mask,
+                     m->song_enabled, m->song_length, m->song_edit_row,
+                     m->song[m->song_edit_row].start,
+                     m->song[m->song_edit_row].length,
+                     m->song[m->song_edit_row].repeats,
+                     m->song[m->song_edit_row].transpose,
+                     song_row_csv,
+                     m->calibration_mode, m->calibration_level,
                      t->base[m->selected_page * 8], t->base[m->selected_page * 8 + 1],
                      t->base[m->selected_page * 8 + 2], t->base[m->selected_page * 8 + 3],
                      t->base[m->selected_page * 8 + 4], t->base[m->selected_page * 8 + 5],
@@ -2621,12 +3864,32 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                      m->record_locks, track_state_csv,
                      m->note_events, m->render_peak, m->lifetime_peak,
                      step_csv, all_step_csv)) return -1;
+        if (!appendf(buf, buf_len, &n, "G%02X%02X",
+                     m->song_enabled, m->song_length)) return -1;
+        for (int row = 0; row < MONO_SONG_ROWS; ++row)
+            if (!appendf(buf, buf_len, &n, "%02X%02X%02X%02X",
+                         m->song[row].start, m->song[row].length,
+                         m->song[row].repeats, m->song[row].transpose + 24)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];
             if (!appendf(buf, buf_len, &n, "T%X%02X%02X%02X%02X%02X%02X%02X%02X",
                          tr, saved->machine, saved->seq_override, saved->seq_start,
                          saved->seq_len, saved->seq_rotation, saved->seq_division,
                          saved->mute, saved->solo)) return -1;
+            if (!appendf(buf, buf_len, &n,
+                         "%02X%02X%02X%02X%02X%02X%02X%02X",
+                         saved->arp.enabled, saved->arp.latch, saved->arp.mode,
+                         saved->arp.rate, saved->arp.octaves, saved->arp.gate,
+                         saved->arp.length, saved->arp.velocity)) return -1;
+            for (int step = 0; step < MONO_ARP_STEPS; ++step)
+                if (!appendf(buf, buf_len, &n, "%02X", saved->arp.offset[step] + 24))
+                    return -1;
+            if (!appendf(buf, buf_len, &n,
+                         "%02X%02X%02X%02X%02X%02X%02X%02X",
+                         saved->route.route_mode, saved->route.route_amount,
+                         saved->route.fx_type, saved->route.fx_amount,
+                         saved->route.fx_tone, saved->route.fx_feedback,
+                         saved->route.fx_mix, saved->route.level)) return -1;
             for (int pid = 0; pid < MONO_PARAMS; ++pid)
                 if (!appendf(buf, buf_len, &n, "%02X", saved->base[pid])) return -1;
             for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
@@ -2635,6 +3898,18 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                 for (int i = 0; i < 16; ++i)
                     if (!appendf(buf, buf_len, &n, "%02X",
                                  saved->machine_params[machine][i])) return -1;
+            }
+            if (saved->morph_valid & 1) {
+                if (!appendf(buf, buf_len, &n, "A%X%02X%02X", tr,
+                             saved->morph_machine, saved->morph_value)) return -1;
+                for (int pid = 0; pid < MONO_PARAMS; ++pid)
+                    if (!appendf(buf, buf_len, &n, "%02X", saved->morph_a[pid])) return -1;
+            }
+            if (saved->morph_valid & 2) {
+                if (!appendf(buf, buf_len, &n, "B%X%02X%02X", tr,
+                             saved->morph_machine, saved->morph_value)) return -1;
+                for (int pid = 0; pid < MONO_PARAMS; ++pid)
+                    if (!appendf(buf, buf_len, &n, "%02X", saved->morph_b[pid])) return -1;
             }
             for (int si = 0; si < MONO_STEPS; ++si) {
                 const mono_step_t *step = &saved->steps[si];
@@ -2652,8 +3927,14 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                 if ((behavior & 2) && !appendf(buf, buf_len, &n, "%02X", step->retrig)) return -1;
                 if ((behavior & 4) && !appendf(buf, buf_len, &n, "%02X", step->condition)) return -1;
                 if ((behavior & 8) && !appendf(buf, buf_len, &n, "%02X", step->slide)) return -1;
-                if (!append_v5_mask(buf, buf_len, &n, step) ||
-                    !append_v5_lock_values(buf, buf_len, &n, step)) return -1;
+                int extended = (step->micro != 0 ? 1 : 0) |
+                    (step->tie ? 2 : 0) | (step->accent ? 4 : 0) |
+                    (step_has_all_locks(step) ? 8 : 0);
+                if (!appendf(buf, buf_len, &n, "%c", state64[extended])) return -1;
+                if ((extended & 1) && !appendf(buf, buf_len, &n, "%02X", step->micro + 24)) return -1;
+                if ((extended & 4) && !appendf(buf, buf_len, &n, "%02X", step->accent)) return -1;
+                if (!(extended & 8) && !append_v5_mask(buf, buf_len, &n, step)) return -1;
+                if (!append_v5_lock_values(buf, buf_len, &n, step)) return -1;
             }
         }
         if (!appendf(buf, buf_len, &n, "\"}")) return -1;
@@ -2690,4 +3971,8 @@ void mono_debug_filter_cutoffs(mono_t *m, int track, float *highpass_hz,
     if (!m || track < 0 || track >= m->track_count) return;
     if (highpass_hz) *highpass_hz = m->track[track].filter_hp_hz;
     if (lowpass_hz) *lowpass_hz = m->track[track].filter_lp_hz;
+}
+
+int mono_debug_user_wave_mask(const mono_t *m) {
+    return m ? m->user_wave_mask : 0;
 }
