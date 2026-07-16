@@ -7,7 +7,7 @@ last_touched: 2026-07-15
 
 Mono is a clean-room Schwung instrument inspired by the Elektron Monomachine's
 machine-per-track architecture. It does not contain Elektron code or factory
-content. Version 0.1 is a playable architectural slice, not a bit-exact clone.
+content. The current development line is a playable instrument, not a bit-exact clone.
 
 ## Builds
 
