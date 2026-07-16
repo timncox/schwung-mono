@@ -65,11 +65,30 @@
       ]
     },
     {
+      "title": "Arpeggiator",
+      "lines": [
+        "Jog past LFO 3 to",
+        "open the ARP page.",
+        "Knob 1: arp on/off.",
+        "Knob 2: latch.",
+        "Knobs 3-8 shape it.",
+        "",
+        "ARP STEP uses knobs",
+        "for offsets 1-8.",
+        "Hold Shift for 9-16.",
+        "Turn latch off to",
+        "release latched notes."
+      ]
+    },
+    {
       "title": "Saving",
       "lines": [
         "Use Schwung User",
         "Presets for sound",
         "and automation.",
+        "Each machine keeps",
+        "its own synth setup",
+        "inside the preset.",
         "",
         "Move sequences live",
         "in the Move Set.",

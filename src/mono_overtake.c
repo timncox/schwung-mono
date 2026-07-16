@@ -10,7 +10,8 @@ static const host_api_v1_t *g_host;
 static void *overtake_create(const char *module_dir, const char *json_defaults) {
     (void)module_dir;
     (void)json_defaults;
-    return mono_create(g_host, MONO_MAX_TRACKS);
+    return mono_create_with_storage(g_host, MONO_MAX_TRACKS,
+                                    "/data/UserData/schwung/mono-user-waves-v1.bin");
 }
 
 static void overtake_destroy(void *instance) { mono_destroy((mono_t *)instance); }

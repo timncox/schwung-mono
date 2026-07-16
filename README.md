@@ -8,7 +8,8 @@ It ships in two forms:
 - **Mono Voice** (`mono-voice`) — one machine voice inside a normal Move
   track, using Move's pads and sequencer.
 - **Mono** (`mono`) — a full-surface six-track instrument with an internal
-  64-step sequencer and per-step parameter locks.
+  64-step sequencer, per-step parameter locks, independent track timing,
+  probability, retrigs, conditions, and slide.
 
 ## Operation manual
 
@@ -29,6 +30,10 @@ Every track also has an AHDR envelope, dual-cutoff resonant filter,
 distortion, EQ, sample-rate reduction, stereo filtered delay, portamento,
 pan, and three assignable LFOs.
 
+Each track remembers a separate 16-control synthesis panel for every machine.
+Switching from Saw to Pulse and back restores the Saw settings you left behind;
+those per-machine sounds are included in Mono state and presets.
+
 Hold Shift while turning knobs 1–8 on any sound page to open its secondary
 bank. SYNTH adds machine-specific controls plus Drift, Fold, Bits, and Noise;
 AMP adds envelope curves and performance response; FILTER adds tracking,
@@ -44,6 +49,58 @@ On Move, destination readouts use compact five-character names that stay in
 their knob column. Trigger and Wave are five-position controls with named
 readouts: Free/Retrigger/Hold/One Shot/Half Shot and
 Sine/Saw/Triangle/Square/Random.
+
+## Voice modeling
+
+The current engine follows the documented control topology more closely while
+remaining a clean-room implementation:
+
+- SuperWave discontinuities use lightweight band-limiting. Saw contains its
+  base, close and extended unison pairs plus three documented sub types; Pulse
+  contains its base and close unison pair plus two sine subs. Pulse width
+  animation can restart on each note.
+- Ensemble supplies up to four chord voices, including Off and just-intonation
+  pitch choices, a saw-to-square-to-spike wave control, and independent chorus
+  level and width.
+- SID uses a quantized phase counter, pitch-clocked LFSR noise, pulse-width
+  animation, named waveform/modulation modes, and selected-frequency or
+  previous-track modulation sources.
+- DigiPRO keeps the original, factory-independent 32 x 512-sample, 12-bit
+  table design while making wave position, position modulation/restart, and
+  selected-frequency/previous-track sync behave as separate controls.
+- FM+ Static uses its displayed frequency-ratio choices, two feedback paths,
+  the combined operator envelope/volume behavior, and a Tone control that
+  opens additional harmonic content.
+- FILTER treats BASE as the high-pass edge and WDTH as the octave interval to
+  the low-pass edge. Eight parameter steps equal one octave, and new sounds
+  key-track by default.
+
+The Move and Remote UIs show the discrete machine choices as names, ratios,
+notes, or On/Off states instead of raw numbers. State v11 migrates older Pulse
+panels and their parameter locks to the corrected control layout.
+
+## Performance expansion
+
+- **Arp Designer:** per-track On/Latch, Up/Down/Pendulum/Random/Played/Converge
+  modes, eight clock divisions, one to four octaves, gate, fixed-or-played
+  velocity, and a 16-step ±24-semitone offset lane. In Mono Voice, jog past
+  LFO 3 to reach ARP, then ARP STEP; knobs edit offsets 1–8 and Shift + knobs
+  edit offsets 9–16. Turning Latch off releases the latched chord.
+- **Patch Lab:** 12 original starting sounds, Init, bounded randomization, and
+  two complete same-machine parameter snapshots that morph across all 112
+  controls. Discrete choices switch cleanly at the midpoint.
+- **DigiPRO user waves:** eight persistent 512-sample slots shared by Mono and
+  Mono Voice. Remote UI imports an audio file; the engine DC-centers,
+  normalizes, and 12-bit quantizes it before an atomic bank save.
+- **Neighbor and track FX:** each track can mix, replace, ring-modulate, or FM
+  its oscillator from the preceding track, then use dedicated chorus, flanger,
+  ring modulation, reverb, compression, or crushing.
+- **Deeper sequencing:** every step adds ±23/48-step microtiming, tie, and
+  accent. Sixteen song rows chain arbitrary windows with repeats and ±24
+  semitone transposition.
+- **Calibration:** Remote UI can replace output with a conservative 440 Hz
+  sine, logarithmic sweep, impulse, deterministic noise, or stereo-polarity
+  test and reports device-side output peaks/non-finite counts.
 
 ## Live knob recording
 
@@ -68,10 +125,11 @@ and wave remain stepped so automation never passes through an unintended mode.
   Shift + Step 1; Move saves Sets automatically.
 - **Mono six-track pattern:** inside the full-surface build, hold Shift and
   click the jog wheel. **Save current** captures all six sounds, all 64 steps,
-  and every parameter lock; choosing a saved name recalls it without starting
-  transport automatically. Back closes the naming screen or preset browser
-  without leaving Mono; at the main instrument screen it resumes its normal
-  Schwung suspend behavior.
+  every machine variation, track timing, mute/solo state, advanced step
+  settings, and every parameter lock; choosing a saved name recalls it without
+  starting transport automatically. Back closes the naming screen or preset
+  browser without leaving Mono; at the main instrument screen it resumes its
+  normal Schwung suspend behavior.
 
 ## Build and test
 
@@ -97,25 +155,40 @@ scripts/deploy.sh
 - Top-row pads 1-6: select track
 - Top-row pad 7: cycle machine; Shift reverses direction
 - Top-row pad 8: start/stop internal sequencer
-- Shift + top-row pad 8: open Sequence Setup
+- Shift + top-row pad 8: open Setup; turn the jog for Sequence, Step Detail,
+  Arpeggiator, Routing + FX, and Song Mode
+- Delete + top-row pads 1-6: mute/unmute a track
+- Shift + Delete + top-row pads 1-6: solo/unsolo a track
 - Lower three pad rows: chromatic performance keyboard
+- Up / Down: shift the selected track's performance keyboard by ±4 octaves
+- Back: return from Mono to native Move
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
 - Knobs 1-8: edit the current page
 - Shift + knobs 1-8: edit the current page's secondary bank
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
+- Hold step + Copy: copy a step; hold step + Shift + Copy: paste it
+- Copy / Shift + Copy without a held step: copy / paste the selected track
+- Undo: undo or redo the most recent sound, pattern, or timing edit
 - Move Record: arm/disarm live knob-lock recording during playback
 
-Sequence Setup keeps the pattern controls off the sound-editing screen. Knob 1
-sets the first played step, knob 2 sets the window length, knob 3 selects
-Forward/Reverse/Pendulum/Random order, and knob 4 selects the visible 16-step
-page. The Remote UI shows all 64 steps together and dims steps outside the
-saved playback window.
+Setup keeps performance controls off the sound-editing screen. Its Sequence
+page uses knobs 1–4 to
+set global start, length, Forward/Reverse/Pendulum/Random order, and swing.
+Knobs 5–8 set the selected track's start, length, rotation, and clock division;
+Shift + turn on that bank returns it to the global window. Tap a step to set
+the focused start directly. The Remote UI shows all 64 steps together, dims
+steps outside the saved window, and exposes the same global and per-track
+timing controls.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
-Remote UI opens a full editor for either build, including a browser keyboard
+playhead uses a lightweight runtime poll on every UI tick; complete editor
+state refreshes happen separately so the white step LED follows the audio
+without repeatedly pulling the entire pattern. The selected track's octave is
+shown in the header and saved with the pattern. Schwung's Remote UI opens a
+full editor for either build, including a browser keyboard
 for quickly checking the note and audio path. Its audition keys play MIDI notes
 48–60 on the selected track; the large labels are notes and the smaller A–K
 labels are optional computer-key shortcuts. Hold a key to sustain it; even a
@@ -123,21 +196,26 @@ quick click gets a short, audible gate. The status confirms the event was sent,
 while the counter and last measured peak provide device-side diagnostics when
 Schwung refreshes the module state. If the panel is waiting, select a different
 Remote UI Slot tab and return to reconnect Schwung's slot subscription.
-Remote edits use Mono's event command channel so Schwung 0.11.4 does not remount
+Remote edits use Mono's event command channel so Schwung does not remount
 the custom editor for every value emitted during a slider drag.
+The Remote sequence panel also provides step/track copy and paste, undo/redo,
+mute/solo, and an Edit Step mode for note, velocity, gate, trig mask,
+probability, 1–8 retrigs, 1:2/2:2/1:4…4:4 conditions, slide, microtiming,
+ties, and accents. Patch Lab, Arp Designer, user-wave import, neighbor/track
+FX, song rows, and calibration live alongside the sequence panel.
 
 ## Clean-room scope
 
 Mono contains no Elektron firmware, factory wavetables, factory samples, or
-copied visual assets. The initial synthesis algorithms are original
-implementations guided by publicly documented behavior. Exact response-curve
-calibration against reference hardware is future work.
+copied visual assets. The synthesis algorithms are original implementations
+guided by publicly documented behavior and regression measurements. The
+calibration signal suite supports controlled comparisons, but exact
+response-curve matching still requires recordings from reference hardware.
 
-## Version 0.1 boundary
+## Current fidelity boundary
 
-This first vertical slice proves the module architecture and is ready for a
-hardware smoke test. It does not yet include VO-6, BeatBox, DigiPRO user-wave
-loading, FM+ Parallel/Dynamic, FX machines/neighbor routing, arpeggiators,
-or song mode. The current factory-independent algorithms also need A/B
-calibration against a reference Monomachine before they should be described
-as sonically faithful.
+Mono does not yet include VO-6, BeatBox, FM+ Parallel/Dynamic, or dedicated FX
+machines. Its neighbor routing, per-track FX, user waves, arpeggiator, and song
+mode are original clean-room implementations rather than firmware clones. The
+factory-independent algorithms still need A/B measurements against reference
+hardware before they should be described as sonically faithful.

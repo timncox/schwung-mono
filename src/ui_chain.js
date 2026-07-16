@@ -1,4 +1,4 @@
-/* Mono Voice — compact seven-page editor for a normal Move synth slot. */
+/* Mono Voice — sound, arp, and performance editor for a normal Move synth slot. */
 import {
     MoveKnob1, MoveShift, MoveMainKnob, MoveLeft, MoveRight, MoveRec
 } from '/data/UserData/schwung/shared/constants.mjs';
@@ -9,7 +9,9 @@ import { announce, announceParameter, announceView }
     from '/data/UserData/schwung/shared/screen_reader.mjs';
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
-const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3'];
+const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3',
+    'ARP', 'ARP STEP'];
+const SOUND_PAGES = 7, ARP_PAGE = 7, ARP_STEP_PAGE = 8;
 const LFO_DESTS = [
     'OFF','PITCH',
     'SYN 1','SYN 2','SYN 3','SYN 4','SYN 5','SYN 6','SYN 7','TUNE',
@@ -50,6 +52,7 @@ const LFO_TRIGGER_NAMES = ['Free', 'Retrigger', 'Hold', 'One Shot', 'Half Shot']
 const LFO_TRIGGER_SCREEN = ['FREE', 'TRIG', 'HOLD', 'ONE', 'HALF'];
 const LFO_WAVE_NAMES = ['Sine', 'Saw', 'Triangle', 'Square', 'Random'];
 const LFO_WAVE_SCREEN = ['SINE', 'SAW', 'TRI', 'SQR', 'RAND'];
+const SHIFT_PARAM_BASE = 56;
 const COMMON = [
     null,
     ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'],
@@ -61,7 +64,7 @@ const COMMON = [
 ];
 const SYNTH = [
     ['UNIL','UNIW','UNIX','SUBX','SUB1','SUB2','-','TUNE'],
-    ['UNIL','UNIW','UNIX','PW','PWAD','PWRS','-','TUNE'],
+    ['UNIL','UNIW','SUB1','SUB2','PW','PWAD','PWRS','TUNE'],
     ['PCH2','PCH3','PCH4','WAVE','PW','CHRL','CHRW','TUNE'],
     ['PW','PWAD','PWRS','WAVE','MOD','MSRC','MFRQ','TUNE'],
     ['WAVE','WP','WPM','WPRS','SYNC','SFRQ','-','TUNE'],
@@ -83,9 +86,18 @@ const COMMON_SHIFT = [null,
     ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY'],
     ['FADE','DELAY','SLEW','SYMM','STEPS','POL','VEL','KEY']
 ];
+const ARP_LABELS = ['ON','LATCH','MODE','RATE','OCT','GATE','LEN','VELOC'];
+const ARP_STEP_LABELS = ['ST01','ST02','ST03','ST04','ST05','ST06','ST07','ST08'];
+const ARP_STEP_SHIFT_LABELS = ['ST09','ST10','ST11','ST12','ST13','ST14','ST15','ST16'];
+const ARP_MODE_NAMES = ['UP','DOWN','PEND','RAND','PLAY','CNVRG'];
+const ARP_MODE_LONG = ['Up','Down','Pendulum','Random','Played Order','Converge'];
+const ARP_RATE_NAMES = ['1/4','1/8','1/8T','1/16','1/16T','1/32','1/32T','1/64'];
 
 let page = 0, machine = 0, shift = false, shiftVisual = false;
 let recordArmed = false, tickCount = 0;
+let arpEnabled = false, arpLatch = false, userWaveMask = 0;
+let arpValues = [0, 0, 0, 3, 1, 92, 16, 0];
+let arpOffsets = new Array(16).fill(0);
 let values = new Array(8).fill(0);
 let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
@@ -101,26 +113,117 @@ function shiftActive() {
     return shift;
 }
 
-function shiftLayer() { return shiftActive(); }
-function names() { return shiftLayer() ? (page === 0 ? SYNTH_SHIFT[machine] : COMMON_SHIFT[page])
-                                      : (page === 0 ? SYNTH[machine] : COMMON[page]); }
-function activeValues() { return shiftLayer() ? altValues : values; }
-function isLfoDestination(i) { return !shiftLayer() && page >= 4 && i === 0; }
-function isLfoTrigger(i) { return !shiftLayer() && page >= 4 && i === 1; }
-function isLfoWave(i) { return !shiftLayer() && page >= 4 && i === 2; }
+function shiftLayer() { return shiftActive() && page !== ARP_PAGE; }
+function names() {
+    if (page === ARP_PAGE) return ARP_LABELS;
+    if (page === ARP_STEP_PAGE)
+        return shiftLayer() ? ARP_STEP_SHIFT_LABELS : ARP_STEP_LABELS;
+    return shiftLayer() ? (page === 0 ? SYNTH_SHIFT[machine] : COMMON_SHIFT[page])
+                        : (page === 0 ? SYNTH[machine] : COMMON[page]);
+}
+function activeValues() {
+    if (page === ARP_PAGE) return arpValues;
+    if (page === ARP_STEP_PAGE) return arpOffsets.slice(shiftLayer() ? 8 : 0,
+                                                       shiftLayer() ? 16 : 8);
+    return shiftLayer() ? altValues : values;
+}
+function isLfoDestination(i) { return !shiftLayer() && page >= 4 && page < SOUND_PAGES && i === 0; }
+function isLfoTrigger(i) { return !shiftLayer() && page >= 4 && page < SOUND_PAGES && i === 1; }
+function isLfoWave(i) { return !shiftLayer() && page >= 4 && page < SOUND_PAGES && i === 2; }
 function isLfoMode(i) { return isLfoTrigger(i) || isLfoWave(i); }
 function destinationIndex(value) { return Math.max(0, Math.min(LFO_DESTS.length - 1, Math.round(value))); }
 function lfoModeIndex(value) {
     const raw = Math.max(0, Math.min(127, Math.round(value)));
     return Math.max(0, Math.min(4, Math.floor(raw * 5 / 128)));
 }
+function currentParamId(i) { return (shiftLayer() ? SHIFT_PARAM_BASE : 0) + page * 8 + i; }
+const FM_RATIO_NAMES = ['1/64','1/32','1/16','3/32','1/8','3/16','1/4','5/16',
+    '3/8','7/16','1/2','5/8','3/4','7/8','1','1.25','1.5','1.75','2','2.5',
+    '3','3.5','4','5','6','7','8','9','10','12','16','24'];
+function bandIndex(value, count) { return Math.max(0, Math.min(count - 1, Math.floor(value * count / 128))); }
+function noteName(value) {
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    return `${names[value % 12]}${Math.floor(value / 12) - 1}`;
+}
+function machineParameterValue(i, value) {
+    if (shiftLayer() || page !== 0) return null;
+    if (machine === 1 && i === 6) return value < 64 ? 'OFF' : 'ON';
+    if (machine === 2 && i < 3) {
+        if (value < 4) return 'OFF';
+        if (value >= 112) return ['6/5','5/4','4/3','3/2'][Math.min(3, Math.floor((value - 112) / 4))];
+        return `${Math.round((value - 4) * 24 / 107)}ST`;
+    }
+    if (machine === 3) {
+        if (i === 2) return value < 64 ? 'OFF' : 'ON';
+        if (i === 3) return ['TRI','SAW','PULS','MIX','NOIS'][bandIndex(value, 5)];
+        if (i === 4) return ['OFF','RING','SYNC','R+S'][bandIndex(value, 4)];
+        if (i === 5) return value < 64 ? 'MFRQ' : 'PRCH';
+        if (i === 6) return noteName(value);
+    }
+    if (machine === 4) {
+        if (i === 0) {
+            const wave = bandIndex(value, 32);
+            return wave >= 24 && ((userWaveMask >> (wave - 24)) & 1)
+                ? `USR${wave - 23}` : `W${String(wave).padStart(2, '0')}`;
+        }
+        if (i === 3) return value < 64 ? 'OFF' : 'ON';
+        if (i === 4) return ['OFF','SFRQ','PRCH'][bandIndex(value, 3)];
+        if (i === 5) return noteName(value);
+    }
+    if (machine === 5 && (i === 0 || i === 4)) return FM_RATIO_NAMES[bandIndex(value, 32)];
+    return null;
+}
+function secondsFromParam(value, maxSeconds) {
+    return value <= 0 ? 0 : 0.002 * Math.pow(maxSeconds / 0.002, value / 127);
+}
+function shortTime(seconds) {
+    if (seconds <= 0) return '0MS';
+    if (seconds < 1) return `${Math.round(seconds * 1000)}MS`.slice(0, 5);
+    return `${seconds < 10 ? seconds.toFixed(2) : seconds.toFixed(1)}S`.slice(0, 5);
+}
+function shortHz(value) {
+    const hz = 18 * Math.pow(1000, value / 127);
+    return hz >= 1000 ? `${(hz / 1000).toFixed(hz < 10000 ? 1 : 0)}K` : `${Math.round(hz)}HZ`;
+}
+function parameterValue(i, value) {
+    const machineValue = machineParameterValue(i, value);
+    if (machineValue !== null) return machineValue;
+    const pid = currentParamId(i);
+    const times = {8:4, 9:4, 10:12, 11:8, 15:3, 20:4, 21:8,
+        88:8, 89:4, 90:2, 96:8, 97:4, 98:2, 104:8, 105:4, 106:2};
+    if (times[pid]) return shortTime(secondsFromParam(value, times[pid]));
+    if (pid === 28) return shortTime(0.015 + 1.82 * value / 127);
+    if (pid === 24) return shortHz(value);
+    if (pid === 7) { const cents = Math.round((value - 64) * 100 / 64); return `${cents >= 0 ? '+' : ''}${cents}C`; }
+    if (pid === 14) { const pan = Math.round((value - 64) * 100 / 64); return pan === 0 ? 'CENTR' : `${pan < 0 ? 'L' : 'R'}${Math.abs(pan)}`; }
+    if (pid === 25) { const gain = value - 64; return gain === 0 ? '0DB' : `${gain > 0 ? '+' : ''}${gain}DB`; }
+    if (pid === 76 || pid === 77) return value < 64 ? '12DB' : '24DB';
+    if (pid === 93 || pid === 101 || pid === 109) return value < 64 ? 'UNI' : 'BI';
+    if (pid === 62 || pid === 82) return `${16 - Math.round(value * 12 / 127)}BIT`;
+    return `${value}`.padStart(3, '0');
+}
 function displayValue(i, value) {
+    if (page === ARP_PAGE) {
+        if (i < 2) return value ? 'ON' : 'OFF';
+        if (i === 2) return ARP_MODE_NAMES[Math.max(0, Math.min(5, value))];
+        if (i === 3) return ARP_RATE_NAMES[Math.max(0, Math.min(7, value))];
+        if (i === 7 && value === 0) return 'PLAY';
+        return `${value}`;
+    }
+    if (page === ARP_STEP_PAGE) return `${value >= 0 ? '+' : ''}${value}`;
     if (isLfoDestination(i)) return LFO_DEST_SCREEN[destinationIndex(value)];
     if (isLfoTrigger(i)) return LFO_TRIGGER_SCREEN[lfoModeIndex(value)];
     if (isLfoWave(i)) return LFO_WAVE_SCREEN[lfoModeIndex(value)];
-    return `${value}`.padStart(3, '0');
+    return parameterValue(i, value);
 }
 function announcedValue(i, value) {
+    if (page === ARP_PAGE) {
+        if (i < 2) return value ? 'On' : 'Off';
+        if (i === 2) return ARP_MODE_LONG[Math.max(0, Math.min(5, value))];
+        if (i === 3) return ARP_RATE_NAMES[Math.max(0, Math.min(7, value))];
+        if (i === 7 && value === 0) return 'Played velocity';
+    }
+    if (page === ARP_STEP_PAGE) return `${value >= 0 ? 'plus ' : 'minus '}${Math.abs(value)} semitones`;
     if (isLfoDestination(i)) return LFO_DESTS[destinationIndex(value)];
     if (isLfoTrigger(i)) return LFO_TRIGGER_NAMES[lfoModeIndex(value)];
     if (isLfoWave(i)) return LFO_WAVE_NAMES[lfoModeIndex(value)];
@@ -132,7 +235,19 @@ function fetchAll() {
     if (mv === null) return false;
     machine = Math.max(0, Math.min(MACHINES.length - 1, parseInt(mv, 10) || 0));
     recordArmed = parseInt(gp('record') || '0', 10) !== 0;
-    host_module_set_param('page', `${page}`);
+    arpEnabled = parseInt(gp('arp_enabled') || '0', 10) !== 0;
+    arpLatch = parseInt(gp('arp_latch') || '0', 10) !== 0;
+    arpValues = [arpEnabled ? 1 : 0, arpLatch ? 1 : 0,
+        parseInt(gp('arp_mode') || '0', 10) || 0,
+        parseInt(gp('arp_rate') || '3', 10) || 0,
+        parseInt(gp('arp_octaves') || '1', 10) || 1,
+        parseInt(gp('arp_gate') || '92', 10) || 1,
+        parseInt(gp('arp_length') || '16', 10) || 1,
+        parseInt(gp('arp_velocity') || '0', 10) || 0];
+    arpOffsets = (gp('arp_offsets') || '').split(',').map(v => parseInt(v, 10) || 0);
+    while (arpOffsets.length < 16) arpOffsets.push(0);
+    userWaveMask = parseInt(gp('user_wave_mask') || '0', 10) || 0;
+    if (page < SOUND_PAGES) host_module_set_param('page', `${page}`);
     for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
     return true;
@@ -148,7 +263,7 @@ function toggleRecord() {
 function setPage(next) {
     page = (next + PAGES.length) % PAGES.length;
     focusBank = 0;
-    host_module_set_param('page', `${page}`);
+    if (page < SOUND_PAGES) host_module_set_param('page', `${page}`);
     fetchAll();
     announce(`${PAGES[page]} page`);
     needsRedraw = true;
@@ -164,6 +279,31 @@ function setMachine(next) {
 
 function adjust(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
+    if (page === ARP_PAGE) {
+        const keys = ['arp_enabled','arp_latch','arp_mode','arp_rate',
+            'arp_octaves','arp_gate','arp_length','arp_velocity'];
+        const low = [0,0,0,0,1,1,1,0], high = [1,1,5,7,4,127,16,127];
+        const v = i < 2 ? (arpValues[i] ? 0 : 1)
+            : Math.max(low[i], Math.min(high[i], arpValues[i] + delta));
+        if (v === arpValues[i] && i >= 2) return;
+        arpValues[i] = v;
+        if (i === 0) arpEnabled = v !== 0;
+        if (i === 1) arpLatch = v !== 0;
+        host_module_set_param(keys[i], `${v}`);
+        announceParameter(ARP_LABELS[i], announcedValue(i, v));
+        needsRedraw = true;
+        return;
+    }
+    if (page === ARP_STEP_PAGE) {
+        const offsetIndex = i + (shiftLayer() ? 8 : 0);
+        const v = Math.max(-24, Math.min(24, arpOffsets[offsetIndex] + delta));
+        if (v === arpOffsets[offsetIndex]) return;
+        arpOffsets[offsetIndex] = v;
+        host_module_set_param('arp_offset', `${offsetIndex}:${v}`);
+        announceParameter(`Arp step ${offsetIndex + 1}`, announcedValue(i, v));
+        needsRedraw = true;
+        return;
+    }
     const target = activeValues();
     let v;
     if (isLfoDestination(i)) {
@@ -184,7 +324,7 @@ function adjust(i, delta) {
 function draw() {
     clear_screen();
     drawHeader(recordArmed ? `REC · ${MACHINES[machine]}`
-                           : `MONO V · ${MACHINES[machine]}`);
+                           : `${arpEnabled ? (arpLatch ? 'ARP L ·' : 'ARP ·') : 'MONO V ·'} ${MACHINES[machine]}`);
     const n = names();
     const shown = activeValues();
     const first = focusBank * 4;
@@ -194,9 +334,18 @@ function draw() {
         print(x, 18, n[i], 1);
         print(x, 34, displayValue(i, shown[i]), 1);
     }
-    drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
-                right: recordArmed ? 'REC: turn knobs'
-                    : (shiftActive() ? 'jog=machine' : 'jog=page')});
+    let footer;
+    if (page === ARP_PAGE)
+        footer = {left: `ARP K${first + 1}-${first + 4}`, right: 'JOG=PAGE'};
+    else if (page === ARP_STEP_PAGE)
+        footer = {left: `${shiftLayer() ? 'ST9-16' : 'ST1-8'} K${first + 1}-${first + 4}`,
+                  right: shiftLayer() ? 'SH BANK' : 'SH=9-16'};
+    else if (shiftActive())
+        footer = {left: `SH K${first + 1}-${first + 4}`,
+                  right: recordArmed ? 'REC KNOBS' : 'JOG=MACH'};
+    else footer = {left: `${PAGES[page]} K${first + 1}-${first + 4}`,
+                   right: recordArmed ? 'REC KNOBS' : 'JOG=PAGE'};
+    drawFooter(footer);
     needsRedraw = false;
 }
 
@@ -217,6 +366,7 @@ globalThis.tick = function() {
             recordArmed = nextRecord;
             needsRedraw = true;
         }
+        if (page >= ARP_PAGE) { fetchAll(); needsRedraw = true; }
     }
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }

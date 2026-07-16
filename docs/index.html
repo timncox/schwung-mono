@@ -737,6 +737,7 @@
       <a href="#surface">Surface</a>
       <a href="#locks">Locks</a>
       <a href="#save">Save</a>
+      <a href="#performance">Perform</a>
       <a href="#pages">Pages</a>
       <a href="#machines">Machines</a>
       <a href="#reference">Reference</a>
@@ -747,7 +748,7 @@
 <main id="manual">
   <div class="hero wrap" id="top">
     <div class="hero-meta">
-      <span>SFX-MV6 / operation manual 0.1</span>
+      <span>SFX-MV6 / operation manual 0.3</span>
       <span>Six-track digital machine instrument</span>
     </div>
     <h1 class="hero-title">Mono<span>//6</span></h1>
@@ -831,12 +832,12 @@
         <div class="mode-summary">
           <h3>A machine inside Move.</h3>
           <p>Mono Voice behaves like a normal Move sound generator: Move owns the track, clips, pads, and sequencing while Mono supplies the synthesis engine.</p>
-          <span class="chip">1 voice</span><span class="chip">Move clips</span><span class="chip">7 pages</span><span class="chip">6 machines</span>
+          <span class="chip">1 voice</span><span class="chip">Move clips</span><span class="chip">9 pages</span><span class="chip">6 machines</span>
         </div>
         <div class="start-list">
           <div class="start-step"><div><b>Add Mono Voice</b><span>Load <code>mono-voice</code> into a normal Move track.</span></div></div>
           <div class="start-step"><div><b>Play normally</b><span>Use Move's pads and sequencer exactly as you would with another sound generator.</span></div></div>
-          <div class="start-step"><div><b>Pick a page</b><span>Turn the jog wheel, or use the left and right arrows, to move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div></div>
+          <div class="start-step"><div><b>Pick a page</b><span>Turn the jog wheel, or use the left and right arrows, to move through SYNTH, AMP, FILTER, EFFECT, LFO 1–3, ARP, and ARP STEP.</span></div></div>
           <div class="start-step"><div><b>Pick a machine or deeper control</b><span>Hold <kbd>Shift</kbd> and turn the jog wheel to change machine. Hold <kbd>Shift</kbd> while turning knobs 1–8 on any page to edit its secondary bank.</span></div></div>
         </div>
       </div>
@@ -873,7 +874,7 @@
           <button type="button" data-inspect="voice">Mono Voice differences</button>
         </div>
       </div>
-      <div class="warning"><b>Sequence Setup</b><span>Hold <kbd>Shift</kbd> and press top-row pad 8. Knobs 1–4 become Start, Length, Order, and visible Page. Choose Forward, Reverse, Pendulum, or Random; tap a Step key in this view to set the start directly. Press Back or Shift + pad 8 to return.</span></div>
+      <div class="warning"><b>Performance Setup</b><span>Hold <kbd>Shift</kbd> and press top-row pad 8. Turn the jog for Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode. Sequence keeps global and per-track timing together; the other screens use the same eight-knob / sixteen-step grammar. Press Back or Shift + pad 8 to return.</span></div>
     </div>
   </section>
 
@@ -903,14 +904,31 @@
       <div class="lock-workflow">
         <div class="lock-card"><span class="big-num">VOICE</span><h3>Save the sound.</h3><p>In Schwung's Chain Editor, highlight the Mono Voice synth block, hold <kbd>Shift</kbd> and click the jog wheel, then open <strong>User Presets</strong> → <strong>Save current</strong>. This recalls the machine, every sound parameter, and Mono's live automation locks.</p></div>
         <div class="lock-card"><span class="big-num">SET</span><h3>Save sound + Move clips.</h3><p>For notes recorded in Move's normal sequencer, save the whole Move Set: hold <kbd>Shift</kbd> and press <kbd>Step 1</kbd>. Sets save automatically and contain the clips, track state, and Mono Voice automation.</p></div>
-        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall it from the same list; all six tracks, 64 steps, playback window, order, and parameter locks return. Back cancels naming or closes the browser without leaving Mono.</p></div>
+        <div class="lock-card"><span class="big-num">MONO</span><h3>Save the six-track pattern.</h3><p>Inside full-surface Mono, hold <kbd>Shift</kbd> and click the jog wheel. Choose <strong>Save current</strong>, name it, and confirm. Recall restores all six tracks, every machine variation, 64 steps, timing, step conditions, mutes, and parameter locks. Back cancels naming or closes the browser without leaving Mono.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="performance">
+    <div class="wrap">
+      <div class="section-head"><div class="index">05 / Perform</div><h2 class="section-title">Build motion into the sound.</h2></div>
+      <p class="lede">Hold <kbd>Shift</kbd> and press top pad 8 in full Mono, then turn the jog to move between Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode. The Remote UI puts the complete system on one screen.</p>
+      <div class="lock-workflow">
+        <div class="lock-card"><span class="big-num">ARP</span><h3>Latch a chord.</h3><p>Choose one of six orders, eight clock rates, one to four octaves, gate, velocity, and a 16-step pitch-offset lane. Tap a Step key to select an arp position; knob 8 edits its ±24-semitone offset. In Mono Voice, jog past LFO 3 to ARP: knob 1 enables the arp and knob 2 enables latch. The next page, ARP STEP, uses knobs for offsets 1–8 and <kbd>Shift</kbd> + knobs for 9–16. Turn latch off to release its notes.</p></div>
+        <div class="lock-card"><span class="big-num">STEP</span><h3>Move off the grid.</h3><p>Step Detail adds ±23/48-step microtiming, ties, and accents beside the existing probability, condition, retrig, and slide controls. Negative timing anticipates the grid; positive timing delays the trig.</p></div>
+        <div class="lock-card"><span class="big-num">SONG</span><h3>Chain windows.</h3><p>Sixteen rows each choose a start, length, repeat count, and ±24-semitone transpose. A row can reuse any section of the same 64 stored steps, so variations do not require duplicate patterns.</p></div>
+      </div>
+      <div class="lock-workflow">
+        <div class="lock-card"><span class="big-num">A/B</span><h3>Morph the patch.</h3><p>Patch Lab contains 12 original starting sounds, Init, and bounded randomization. Capture two endpoints on the same machine, then sweep all continuous controls while discrete modes switch cleanly at center.</p></div>
+        <div class="lock-card"><span class="big-num">NBR</span><h3>Patch tracks together.</h3><p>A track can mix, replace, ring-modulate, or frequency-modulate its oscillator from the preceding track, then pass through dedicated chorus, flanger, ring modulation, reverb, compressor, or crusher.</p></div>
+        <div class="lock-card"><span class="big-num">USR</span><h3>Bring a waveform.</h3><p>Remote UI loads audio into eight persistent DigiPRO user slots shared by Mono and Mono Voice. Mono DC-centers, normalizes, and 12-bit quantizes each 512-sample wave before saving it atomically.</p></div>
       </div>
     </div>
   </section>
 
   <section id="pages">
     <div class="wrap">
-      <div class="section-head"><div class="index">05 / Pages</div><h2 class="section-title">Eight knobs. Seven views. No menu maze.</h2></div>
+      <div class="section-head"><div class="index">06 / Pages</div><h2 class="section-title">Eight knobs. Seven views. No menu maze.</h2></div>
       <p class="lede">Use this live panel to see every label exactly as it appears on Move. Change machine or page; move the sliders to update the mock display.</p>
 
       <div class="editor">
@@ -934,13 +952,13 @@
           </div>
         </div>
       </div>
-      <div class="warning"><b>Shift banks</b><span>Hold Shift and turn any parameter knob on any page for eight additional controls. SYNTH adds machine controls; AMP adds envelope curves and response; FILTER adds tracking, slopes, drive, mix, and saturation; EFFECT adds deeper EQ and delay shaping; each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key tracking. Every LFO can target Pitch or any of the 112 sound parameters.</span></div>
+      <div class="warning"><b>Shift banks + machine memory</b><span>Hold Shift and turn any parameter knob on any page for eight additional controls. SYNTH adds machine controls; AMP adds envelope curves and response; FILTER adds tracking, slopes, drive, mix, and saturation; EFFECT adds deeper EQ and delay shaping; each LFO adds fade, delay, slew, symmetry, steps, polarity, velocity, and key tracking. Every LFO can target Pitch or any of the 112 sound parameters. Each track remembers a separate SYNTH + Shift SYNTH setup for every machine.</span></div>
     </div>
   </section>
 
   <section id="machines">
     <div class="wrap">
-      <div class="section-head"><div class="index">06 / Machines</div><h2 class="section-title">Six starting points. Six different instincts.</h2></div>
+      <div class="section-head"><div class="index">07 / Machines</div><h2 class="section-title">Six starting points. Six different instincts.</h2></div>
       <div class="machines">
         <article class="machine-card">
           <div class="machine-code"><span>M–01</span><span>SUPERWAVE</span></div>
@@ -951,31 +969,31 @@
         <article class="machine-card">
           <div class="machine-code"><span>M–02</span><span>SUPERWAVE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i><i style="--h:55px"></i><i style="--h:55px"></i><i style="--h:12px"></i><i style="--h:12px"></i></div>
-          <h3>SW Pulse</h3><p>A unison pulse stack with animated width. Good for hollow bass, nasal leads, and moving PWM beds.</p>
-          <ul><li>Pulse width</li><li>PWM</li><li>Shift: asym / sync / sub</li></ul>
+          <h3>SW Pulse</h3><p>A band-limited base pulse and unison pair with animated width plus two sine subs. Good for hollow bass, nasal leads, and moving PWM beds.</p>
+          <ul><li>Two sine subs</li><li>Pulse width + restart</li><li>Shift: asym / stack / sync</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–03</span><span>SUPERWAVE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:17px"></i><i style="--h:34px"></i><i style="--h:51px"></i><i style="--h:27px"></i><i style="--h:62px"></i><i style="--h:41px"></i><i style="--h:20px"></i><i style="--h:56px"></i><i style="--h:32px"></i><i style="--h:48px"></i><i style="--h:23px"></i><i style="--h:60px"></i></div>
-          <h3>SW Ensemble</h3><p>Four pitched oscillators with waveform, pulse width, and stereo chorus controls. The harmony machine.</p>
-          <ul><li>4 pitches</li><li>Wave</li><li>Shift: four voice levels</li></ul>
+          <h3>SW Ensemble</h3><p>Up to four pitched voices with Off and just-ratio choices, a saw-to-square-to-spike wave control, and chorus. The harmony machine.</p>
+          <ul><li>4 pitches</li><li>Wave + pulse width</li><li>Chorus level + width</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–04</span><span>DIGITAL CHIP</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:54px"></i><i style="--h:19px"></i><i style="--h:43px"></i><i style="--h:12px"></i><i style="--h:62px"></i><i style="--h:31px"></i><i style="--h:51px"></i><i style="--h:17px"></i><i style="--h:45px"></i><i style="--h:23px"></i><i style="--h:59px"></i><i style="--h:15px"></i></div>
-          <h3>SID 6581</h3><p>Chip-style digital oscillator with selectable waveform, modulation source, and hard-edged frequency interaction.</p>
-          <ul><li>Wave</li><li>Mod source</li><li>Shift: ring / sub / chaos</li></ul>
+          <h3>SID 6581</h3><p>Quantized chip-style oscillator with pitch-clocked noise, pulse-width animation, and selected or previous-track modulation sources.</p>
+          <ul><li>Five wave choices</li><li>Ring / sync modes</li><li>Shift: ring / sub / chaos</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–05</span><span>WAVETABLE</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:13px"></i><i style="--h:28px"></i><i style="--h:52px"></i><i style="--h:38px"></i><i style="--h:61px"></i><i style="--h:25px"></i><i style="--h:46px"></i><i style="--h:17px"></i><i style="--h:56px"></i><i style="--h:34px"></i><i style="--h:22px"></i><i style="--h:63px"></i></div>
-          <h3>DigiPRO</h3><p>A factory-independent 512-sample, 12-bit wavetable voice with position modulation and oscillator sync.</p>
-          <ul><li>Wave position</li><li>Mod</li><li>Shift: second wavetable</li></ul>
+          <h3>DigiPRO</h3><p>A factory-independent bank of 32 512-sample, 12-bit waves with position animation, restart, oscillator sync, and eight replaceable user slots.</p>
+          <ul><li>24 generated + 8 user waves</li><li>Selected / previous sync</li><li>Shift: second wavetable</li></ul>
         </article>
         <article class="machine-card">
           <div class="machine-code"><span>M–06</span><span>FM+</span></div>
           <div class="wave" aria-hidden="true"><i style="--h:16px"></i><i style="--h:40px"></i><i style="--h:61px"></i><i style="--h:33px"></i><i style="--h:12px"></i><i style="--h:46px"></i><i style="--h:57px"></i><i style="--h:25px"></i><i style="--h:19px"></i><i style="--h:51px"></i><i style="--h:54px"></i><i style="--h:29px"></i></div>
-          <h3>FM+ Static</h3><p>Two-block FM with ratios, fine tune, feedback, envelope depth, modulator level, and tone.</p>
+          <h3>FM+ Static</h3><p>Two-block FM with named ratios, separate feedback behavior, a combined operator envelope, modulator level, and harmonic tone shaping.</p>
           <ul><li>2 blocks</li><li>Feedback</li><li>Shift: third operator</li></ul>
         </article>
       </div>
@@ -984,48 +1002,54 @@
 
   <section id="reference">
     <div class="wrap">
-      <div class="section-head"><div class="index">07 / Reference</div><h2 class="section-title">Everything worth remembering.</h2></div>
+      <div class="section-head"><div class="index">08 / Reference</div><h2 class="section-title">Everything worth remembering.</h2></div>
       <div class="reference-grid">
         <div class="ref-panel">
           <h3>Mono / full surface</h3>
-          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks.</span></div>
+          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks. Delete + pad toggles mute; Shift + Delete + pad toggles solo.</span></div>
           <div class="ref-row"><b>Top pad 7</b><span>Next machine. <kbd>Shift</kbd> + pad selects the previous machine.</span></div>
-          <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer. <kbd>Shift</kbd> + pad 8 opens Sequence Setup.</span></div>
-          <div class="ref-row"><b>Lower 24 pads</b><span>Chromatic keyboard for the selected track, starting at MIDI note 48.</span></div>
+          <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer. <kbd>Shift</kbd> + pad 8 opens Setup; turn the jog for Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode.</span></div>
+          <div class="ref-row"><b>Lower 24 pads</b><span>Chromatic keyboard for the selected track, starting at MIDI note 48 at octave O+0.</span></div>
+          <div class="ref-row"><b>Up / Down</b><span>Shift the selected track's performance keyboard by up to four octaves in either direction. The header shows O−4 through O+4; Tune remains a fine ±100-cent control.</span></div>
           <div class="ref-row"><b>Remote audition keys</b><span>Play MIDI notes 48–60 on the selected Mono track. The large label is the note; the small A–K label is its optional computer-key shortcut. A click is held long enough to be audible. If the Remote UI says it is waiting, select another Slot tab and return to reconnect it.</span></div>
           <div class="ref-row"><b>Step keys</b><span>Tap to toggle trigs; hold while turning a knob to lock it.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Select steps 1–16, 17–32, 33–48, or 49–64.</span></div>
-          <div class="ref-row"><b>Sequence Setup</b><span>Knobs 1–4 set playback start, length, Forward/Reverse/Pendulum/Random order, and visible step page. Tap a Step key to choose the start.</span></div>
+          <div class="ref-row"><b>Setup</b><span>Sequence edits window/timing; Step Detail edits microtiming, tie, accent, probability and retrig; Arp edits latch and its 16 offsets; Routing patches the previous track and track FX; Song edits 16 chain rows.</span></div>
+          <div class="ref-row"><b>Copy and Undo</b><span>Hold a step + Copy to copy; add Shift to paste. With no held step, Copy / Shift + Copy works on the whole selected track. Undo toggles undo and redo.</span></div>
+          <div class="ref-row"><b>Remote UI</b><span>In addition to full Step Detail, Remote exposes Patch Lab and morphing, user-wave import, the arp lane, routing/track FX, song rows, and low-level calibration signals.</span></div>
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>Edit the current page's secondary eight-control bank.</span></div>
           <div class="ref-row"><b>Record</b><span>Arm live parameter-lock capture. Start the internal sequencer and turn knobs; continuous values glide between recorded steps.</span></div>
+          <div class="ref-row"><b>Back</b><span>Return from full-surface Mono to native Move. Back closes Setup or the preset browser first when either is open.</span></div>
         </div>
         <div class="ref-panel">
           <h3>Mono Voice / normal track</h3>
           <div class="ref-row"><b>Move pads</b><span>Play the voice using Move's normal pad layout.</span></div>
           <div class="ref-row"><b>Move sequencer</b><span>Record and edit notes using Move's native clips and steps.</span></div>
-          <div class="ref-row"><b>Jog wheel</b><span>Move through SYNTH, AMP, FILTER, EFFECT, and LFO 1–3.</span></div>
+          <div class="ref-row"><b>Jog wheel</b><span>Move through SYNTH, AMP, FILTER, EFFECT, LFO 1–3, ARP, and ARP STEP.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Previous or next parameter page.</span></div>
           <div class="ref-row"><b>Shift + jog</b><span>Change synthesis machine.</span></div>
-          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls for the current page.</span></div>
+          <div class="ref-row"><b>Shift + knobs</b><span>Reveal and edit eight additional controls on sound pages. On ARP STEP they edit pitch offsets 9–16.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page; the display follows knobs 1–4 or 5–8 as you touch them.</span></div>
           <div class="ref-row"><b>Record</b><span>Arm Mono automation while Move plays or records. Notes remain in the Move clip; clocked knob locks live in Mono Voice.</span></div>
+          <div class="ref-row"><b>ARP page</b><span>Knob 1 toggles the arp; knob 2 toggles latch; knobs 3–8 set mode, rate, octaves, gate, length, and velocity. Turn latch off to release its chord.</span></div>
+          <div class="ref-row"><b>ARP STEP</b><span>Knobs edit pitch offsets 1–8; hold Shift while turning them to edit offsets 9–16.</span></div>
           <div class="ref-row"><b>Track effects</b><span>Mono Voice still sits inside a normal Move track and its surrounding workflow.</span></div>
           <div class="ref-row"><b>Best for</b><span>Using one Mono engine alongside Move's other tracks and clip tools.</span></div>
         </div>
       </div>
-      <div class="warning"><b>Version 0.1 boundary</b><span>VO-6, BeatBox, DigiPRO user-wave loading, FM+ Parallel/Dynamic, FX machines, neighbor routing, arpeggiators, and song mode are not implemented yet. Mono is inspired by a workflow, not a firmware clone; its current algorithms are original and still await reference-hardware calibration.</span></div>
+      <div class="warning"><b>Current fidelity boundary</b><span>The documented topology, parameter routing, restart behavior, filter octave tracking, user-wave persistence, arp latch, neighbor routing, track FX, microtiming, and song state have regression coverage. VO-6, BeatBox, FM+ Parallel/Dynamic, and dedicated FX machines are not implemented. Mono remains a clean-room interpretation, not a firmware clone; its calibration generators enable controlled comparison but do not replace measurements from reference hardware.</span></div>
     </div>
   </section>
 
   <section id="install">
     <div class="wrap">
-      <div class="section-head"><div class="index">08 / Install</div><h2 class="section-title">Two modules. One archive each.</h2></div>
+      <div class="section-head"><div class="index">09 / Install</div><h2 class="section-title">Two modules. One archive each.</h2></div>
       <div class="install-grid">
         <div class="install-card">
-          <h3>Already on Tim's Move.</h3>
-          <p>The current development build is installed as <code>mono</code> and <code>mono-voice</code>. After a new deployment, rescan Schwung modules or restart Move so the new files are loaded.</p>
+          <h3>Installing a development build.</h3>
+          <p>Mono installs as <code>mono</code> and <code>mono-voice</code>. After a deployment, rescan Schwung modules or restart Move so the new files are loaded.</p>
           <p>For another Move, install <a href="https://github.com/charlesvestal/schwung">Schwung</a>, then upload <code>mono-module.tar.gz</code> and/or <code>mono-voice-module.tar.gz</code> with schwung-manager.</p>
         </div>
         <div class="install-card">
@@ -1057,7 +1081,7 @@
 <script>
   const MACHINES = [
     { name: 'SW SAW', desc: 'Stacked detuned saws with sub oscillators for wide basses, leads, and drones.', params: ['UNIL','UNIW','UNIX','SUBX','SUB1','SUB2','–','TUNE'] },
-    { name: 'SW PULS', desc: 'A unison pulse stack with animated pulse width for hollow basses and moving PWM textures.', params: ['UNIL','UNIW','UNIX','PW','PWAD','PWRS','–','TUNE'] },
+    { name: 'SW PULS', desc: 'A base pulse and unison pair with two sine subs and restartable pulse-width animation.', params: ['UNIL','UNIW','SUB1','SUB2','PW','PWAD','PWRS','TUNE'] },
     { name: 'SW ENS', desc: 'Four pitched oscillators with waveform, pulse width, and stereo chorus controls.', params: ['PCH2','PCH3','PCH4','WAVE','PW','CHRL','CHRW','TUNE'] },
     { name: 'SID6581', desc: 'Chip-style digital oscillator with selectable waveform and frequency modulation.', params: ['PW','PWAD','PWRS','WAVE','MOD','MSRC','MFRQ','TUNE'] },
     { name: 'DIGIPRO', desc: 'Factory-independent 12-bit wavetable synthesis with position modulation and sync.', params: ['WAVE','WP','WPM','WPRS','SYNC','SFRQ','–','TUNE'] },
@@ -1066,7 +1090,7 @@
   const PAGES = [
     { name: 'SYNTH', desc: 'The eight synthesis controls change with the selected machine.' },
     { name: 'AMP', desc: 'Shape the AHDR amplitude envelope, drive, level, pan, and portamento.', params: ['ATK','HOLD','DEC','REL','DIST','VOL','PAN','PORT'] },
-    { name: 'FILTER', desc: 'Set the dual-cutoff resonant filter and its dedicated envelope.', params: ['BASE','WDTH','HPQ','LPQ','FATK','FDEC','FBA','FWD'] },
+    { name: 'FILTER', desc: 'BASE sets the high-pass edge; WDTH sets the octave gap to the low-pass edge. Eight steps equal one octave.', params: ['BASE','WDTH','HPQ','LPQ','FATK','FDEC','FBA','FWD'] },
     { name: 'EFFECT', desc: 'Tone and spatial tools: EQ, sample-rate reduction, and stereo filtered delay.', params: ['EQF','EQG','SRR','DSND','DTIM','DFB','DBAS','DWID'] },
     { name: 'LFO 1', desc: 'Assign LFO 1, then set trigger mode, shape, speed, depth, and phase.', params: ['DEST','TRIG','WAVE','MULT','SPD','INTL','DPTH','PHAS'] },
     { name: 'LFO 2', desc: 'A second independent assignable LFO with the same eight controls.', params: ['DEST','TRIG','WAVE','MULT','SPD','INTL','DPTH','PHAS'] },
@@ -1169,7 +1193,7 @@
   const padData = [];
   for (let i = 0; i < 6; i++) padData.push({ label: `Track ${i + 1}`, cls: 'track' + (i === 0 ? ' active' : ''), title: `TRACK ${i + 1}`, copy: `Selects synth track ${i + 1}. The selected track owns its own machine, sound settings, and 64-step pattern.` });
   padData.push({ label: 'Machine +', cls: 'machine', title: 'NEXT MACHINE', copy: 'Cycles forward through the six synthesis machines. Hold Shift while pressing to cycle backward.' });
-  padData.push({ label: 'Play / setup', cls: 'play', title: 'TRANSPORT', copy: 'Starts or stops Mono’s internal six-track sequencer. Hold Shift while pressing to open Sequence Setup for start, length, order, and page.' });
+  padData.push({ label: 'Play / setup', cls: 'play', title: 'TRANSPORT', copy: 'Starts or stops Mono’s internal six-track sequencer. Hold Shift while pressing to open Setup, then turn the jog for Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode.' });
   for (let i = 0; i < 24; i++) padData.push({ label: `Note ${48 + i}`, cls: 'note', title: `MIDI NOTE ${48 + i}`, copy: 'Plays the selected track chromatically. The lower three pad rows cover 24 consecutive notes.' });
   padData.forEach((data, i) => {
     const button = document.createElement('button');
@@ -1205,8 +1229,8 @@
   const inspectExtras = {
     jog: ['NAVIGATION', 'JOG', 'PARAMETER PAGE', 'Turn the jog wheel to cycle through SYNTH, AMP, FILTER, EFFECT, LFO 1, LFO 2, and LFO 3.'],
     arrows: ['SEQUENCER', '← / →', 'STEP PAGE', 'Select one of four 16-step pages: 1–16, 17–32, 33–48, or 49–64.'],
-    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On every sound page, Shift plus knobs edits eight additional controls. Shift plus jog changes machine. Shift plus top-row pad 8 opens Sequence Setup. While holding a step, Shift plus a knob turn removes that parameter lock.'],
-    voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages; Shift plus jog changes the machine.']
+    shift: ['MODIFIER', 'SHIFT', 'SECONDARY CONTROLS', 'On every sound page, Shift plus knobs edits eight additional controls. On Mono Voice ARP STEP, Shift plus knobs selects offsets 9 through 16. Shift plus jog changes machine. Shift plus top-row pad 8 opens Setup.'],
+    voice: ['MONO VOICE', 'TRACK BUILD', 'MOVE STAYS MOVE', 'In Mono Voice, Move keeps its normal pads and sequencer. Jog or arrows change pages, including ARP and ARP STEP; Shift plus jog changes the machine.']
   };
   document.querySelectorAll('[data-inspect]').forEach(button => button.addEventListener('click', () => inspect(...inspectExtras[button.dataset.inspect])));
 

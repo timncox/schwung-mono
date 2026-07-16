@@ -10,7 +10,9 @@
         "sequencer.",
         "",
         "Open from Schwung's",
-        "overtake menu."
+        "overtake menu.",
+        "Back returns to",
+        "native Move."
       ]
     },
     {
@@ -24,7 +26,9 @@
         "stops sequencing.",
         "",
         "Lower 3 pad rows",
-        "play notes."
+        "play notes.",
+        "Up / Down changes",
+        "the track octave."
       ]
     },
     {
@@ -38,23 +42,84 @@
         "White = playing.",
         "",
         "Arrows change the",
-        "16-step page."
+        "16-step page.",
+        "",
+        "Copy + held step:",
+        "copy. Shift + Copy:",
+        "paste. Undo toggles",
+        "undo and redo."
       ]
     },
     {
       "title": "Play Window",
       "lines": [
         "Shift + top pad 8",
-        "opens Seq Setup.",
+        "opens Setup.",
+        "Turn the jog for",
+        "Sequence, Step, Arp,",
+        "Routing, and Song.",
         "",
         "Knob 1: start.",
         "Knob 2: length.",
         "Knob 3: order.",
-        "Knob 4: step page.",
+        "Knob 4: swing.",
+        "Knobs 5-8: track",
+        "start, length,",
+        "rotation, division.",
+        "Shift + turn 5-8",
+        "returns to global.",
         "",
         "Orders are Forward,",
         "Reverse, Pendulum",
         "and Random."
+      ]
+    },
+    {
+      "title": "Arp and Routing",
+      "lines": [
+        "In Setup, choose",
+        "Arpeggiator.",
+        "Knobs set on, latch,",
+        "mode, rate, octaves,",
+        "gate and length.",
+        "Tap a step then turn",
+        "knob 8 for its offset.",
+        "Shift + knob 8 sets",
+        "fixed velocity.",
+        "",
+        "Routing mixes the",
+        "previous track before",
+        "filter and track FX."
+      ]
+    },
+    {
+      "title": "Step and Song",
+      "lines": [
+        "Step Detail adds",
+        "microtiming, tie,",
+        "accent, probability",
+        "and retrigs.",
+        "",
+        "Song Mode chains 16",
+        "step windows. Each",
+        "row has start, length,",
+        "repeats and transpose.",
+        "Tap a step key to",
+        "select a song row."
+      ]
+    },
+    {
+      "title": "Mute and Solo",
+      "lines": [
+        "Delete + top pad",
+        "1-6 toggles mute.",
+        "",
+        "Shift + Delete +",
+        "top pad 1-6",
+        "toggles solo.",
+        "",
+        "Green = solo.",
+        "Dim = muted."
       ]
     },
     {
@@ -108,8 +173,10 @@
         "",
         "Save current keeps",
         "all 6 sounds, 64",
-        "steps, play window,",
-        "order and locks.",
+        "steps, per-machine",
+        "sounds, timing,",
+        "step behavior,",
+        "mutes and locks.",
         "",
         "Back closes preset",
         "and setup screens."
