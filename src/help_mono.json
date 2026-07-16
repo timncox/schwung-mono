@@ -10,7 +10,9 @@
         "sequencer.",
         "",
         "Open from Schwung's",
-        "overtake menu."
+        "overtake menu.",
+        "Back returns to",
+        "native Move."
       ]
     },
     {
@@ -24,7 +26,9 @@
         "stops sequencing.",
         "",
         "Lower 3 pad rows",
-        "play notes."
+        "play notes.",
+        "Up / Down changes",
+        "the track octave."
       ]
     },
     {

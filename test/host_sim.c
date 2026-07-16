@@ -876,6 +876,20 @@ static void test_production_event_paths(void) {
 
     full = mono_create(&host, 6);
     assert(full);
+    mono_set_param(full, "track", "2");
+    mono_set_param(full, "keyboard_octave", "2");
+    assert(get_int(full, "keyboard_octave") == 2);
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(debug_note(full) == 72); /* pad C3 shifted to C5 */
+    mono_set_param(full, "keyboard_octave", "99");
+    assert(get_int(full, "keyboard_octave") == 4);
+    assert(debug_note(full) == -1); /* octave changes release the old pad map */
+    mono_set_param(full, "undo", "1");
+    assert(get_int(full, "keyboard_octave") == 2);
+    mono_destroy(full);
+
+    full = mono_create(&host, 6);
+    assert(full);
     uint8_t control_pad[3] = {0x90, 92, 112};
     mono_on_midi(full, control_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
     assert(render_energy(full, 4) == 0);
@@ -925,12 +939,14 @@ static void test_full_state_round_trip(void) {
     mono_set_param(source, "master", "137");
     mono_set_param(source, "bpm_override", "123.5");
     mono_set_param(source, "track", "0");
+    mono_set_param(source, "keyboard_octave", "1");
     mono_set_param(source, "machine", "2");
     mono_set_param(source, "syn1", "17");
     mono_set_param(source, "set_step", "0:48:101:77:15");
     mono_set_param(source, "lock", "0:0:0:99");
     mono_set_param(source, "lock", "0:0:32:48");
     mono_set_param(source, "track", "4");
+    mono_set_param(source, "keyboard_octave", "-2");
     mono_set_param(source, "machine", "5");
     mono_set_param(source, "page", "6");
     mono_set_param(source, "p8", "111");
@@ -968,7 +984,7 @@ static void test_full_state_round_trip(void) {
     char state[16384], recalled[16384];
     int state_len = mono_get_param(source, "state", state, sizeof(state));
     assert(state_len > 0 && state_len < (int)sizeof(state));
-    assert(strstr(state, "\"v\":10"));
+    assert(strstr(state, "\"v\":11"));
     assert(strstr(state, "\"data\":\"G"));
 
     mono_set_param(restored, "transport", "1");
@@ -982,6 +998,7 @@ static void test_full_state_round_trip(void) {
     assert(get_int(restored, "play_order") == 2);
     assert(get_int(restored, "master") == 137);
     assert(get_int(restored, "machine") == 5);
+    assert(get_int(restored, "keyboard_octave") == -2);
     assert(get_int(restored, "p8") == 111);
     assert(get_int(restored, "alt1") == 87);
     assert(get_int(restored, "alt8") == 29);
@@ -1006,6 +1023,7 @@ static void test_full_state_round_trip(void) {
     mono_set_param(restored, "page", "0");
     mono_set_param(restored, "step_page", "0");
     assert(get_int(restored, "machine") == 2);
+    assert(get_int(restored, "keyboard_octave") == 1);
     assert(get_int(restored, "syn1") == 17);
     get_string(restored, "steps", steps, sizeof(steps));
     assert(!strncmp(steps, "2,", 2));
@@ -1074,7 +1092,7 @@ static void test_v8_pulse_panel_and_locks_migrate(void) {
 
     char state[8192];
     assert(mono_get_param(source, "state", state, sizeof(state)) > 0);
-    char *version = strstr(state, "\"v\":10");
+    char *version = strstr(state, "\"v\":11");
     char *data = strstr(state, "\"data\":\"");
     assert(version && data);
     version[4] = '8';
@@ -1085,6 +1103,7 @@ static void test_v8_pulse_panel_and_locks_migrate(void) {
     assert(data[0] == 'G');
     memmove(data, data + 133, strlen(data + 133) + 1); /* strip v10 song record */
     assert(!strncmp(data, "T001", 4));
+    data[16] = '0'; data[17] = '0'; /* v8 stored solo without packed octave */
     memmove(data + 18, data + 82, strlen(data + 82) + 1); /* strip arp/route */
     const char legacy_panel[] = "0A0B63212C7F4D42";
     memcpy(data + 18, legacy_panel, sizeof(legacy_panel) - 1);

@@ -76,7 +76,7 @@ remaining a clean-room implementation:
   key-track by default.
 
 The Move and Remote UIs show the discrete machine choices as names, ratios,
-notes, or On/Off states instead of raw numbers. State v10 migrates older Pulse
+notes, or On/Off states instead of raw numbers. State v11 migrates older Pulse
 panels and their parameter locks to the corrected control layout.
 
 ## Performance expansion
@@ -160,6 +160,8 @@ scripts/deploy.sh
 - Delete + top-row pads 1-6: mute/unmute a track
 - Shift + Delete + top-row pads 1-6: solo/unsolo a track
 - Lower three pad rows: chromatic performance keyboard
+- Up / Down: shift the selected track's performance keyboard by ±4 octaves
+- Back: return from Mono to native Move
 - Step buttons: select/toggle steps; arrows select one of four 16-step pages
 - Jog wheel: select one of seven parameter pages
 - Knobs 1-8: edit the current page
@@ -182,7 +184,11 @@ timing controls.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
-Remote UI opens a full editor for either build, including a browser keyboard
+playhead uses a lightweight runtime poll on every UI tick; complete editor
+state refreshes happen separately so the white step LED follows the audio
+without repeatedly pulling the entire pattern. The selected track's octave is
+shown in the header and saved with the pattern. Schwung's Remote UI opens a
+full editor for either build, including a browser keyboard
 for quickly checking the note and audio path. Its audition keys play MIDI notes
 48–60 on the selected track; the large labels are notes and the smaller A–K
 labels are optional computer-key shortcuts. Hold a key to sustain it; even a

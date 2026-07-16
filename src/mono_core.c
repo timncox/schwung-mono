@@ -128,6 +128,7 @@ typedef struct {
     int seq_len;
     int seq_rotation;
     int seq_division;
+    int keyboard_octave;
     mono_arp_settings_t arp;
     mono_route_settings_t route;
     uint8_t morph_a[MONO_PARAMS];
@@ -164,6 +165,7 @@ typedef struct {
     int seq_len;
     int seq_rotation;
     int seq_division;
+    int keyboard_octave;
     mono_arp_settings_t arp;
     mono_route_settings_t route;
     uint8_t morph_a[MONO_PARAMS];
@@ -320,6 +322,7 @@ struct mono {
 
 static void sync_smoothed(mono_track_t *t);
 static void process_sequence_events(mono_t *m, mono_track_t *t);
+static void reset_arp_runtime(mono_track_t *t);
 
 static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
     out->machine = track->machine;
@@ -334,6 +337,7 @@ static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
     out->seq_len = track->seq_len;
     out->seq_rotation = track->seq_rotation;
     out->seq_division = track->seq_division;
+    out->keyboard_octave = track->keyboard_octave;
     out->arp = track->arp;
     out->route = track->route;
     memcpy(out->morph_a, track->morph_a, sizeof(out->morph_a));
@@ -344,6 +348,7 @@ static void copy_track_edit(mono_track_edit_t *out, const mono_track_t *track) {
 }
 
 static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit) {
+    int octave_changed = track->keyboard_octave != edit->keyboard_octave;
     track->machine = edit->machine;
     memcpy(track->base, edit->base, sizeof(track->base));
     memcpy(track->machine_params, edit->machine_params, sizeof(track->machine_params));
@@ -357,6 +362,7 @@ static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit)
     track->seq_len = edit->seq_len;
     track->seq_rotation = edit->seq_rotation;
     track->seq_division = edit->seq_division;
+    track->keyboard_octave = edit->keyboard_octave;
     track->arp = edit->arp;
     track->route = edit->route;
     memcpy(track->morph_a, edit->morph_a, sizeof(track->morph_a));
@@ -364,6 +370,17 @@ static void apply_track_edit(mono_track_t *track, const mono_track_edit_t *edit)
     track->morph_valid = edit->morph_valid;
     track->morph_value = edit->morph_value;
     track->morph_machine = edit->morph_machine;
+    if (octave_changed) {
+        memset(track->held_notes, 0, sizeof(track->held_notes));
+        memset(track->held_velocity, 0, sizeof(track->held_velocity));
+        memset(track->held_order, 0, sizeof(track->held_order));
+        memset(track->physical_notes, 0, sizeof(track->physical_notes));
+        track->note = -1;
+        track->gate_left = 0;
+        track->amp.value = 0.0f;
+        track->amp.stage = ENV_OFF;
+        reset_arp_runtime(track);
+    }
     sync_smoothed(track);
 }
 
@@ -737,6 +754,7 @@ static void performance_defaults(mono_track_t *t) {
     t->arp.gate = 92;
     t->arp.length = MONO_ARP_STEPS;
     t->route.level = 64;
+    t->keyboard_octave = 0;
     t->morph_valid = 0;
     t->morph_value = 0;
     t->morph_machine = 0;
@@ -2561,7 +2579,8 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
          * parameter round-trip; the top row remains reserved for controls. */
         if (note < 68 || note >= 92) return;
         track = m->selected_track;
-        note = 48 + note - 68;
+        note = iclamp(48 + note - 68 + m->track[track].keyboard_octave * 12,
+                      0, 127);
     }
     if (kind == 0x90 && msg[2] > 0) mono_note_on(m, track, note, msg[2]);
     else if (kind == 0x80 || (kind == 0x90 && msg[2] == 0)) mono_note_off(m, track, note);
@@ -2847,6 +2866,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
         if (record == 'T') {
             uint64_t machine64, override64 = 0, start64 = 0, len64 = 16;
             uint64_t rotation64 = 0, division64 = 1, mute64 = 0, solo64 = 0;
+            uint64_t keyboard_octave64 = 4;
             mono_arp_settings_t arp = {0};
             mono_route_settings_t route = {0};
             arp.rate = 3;
@@ -2865,9 +2885,15 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                  !read_hex(&p, end, 2, &rotation64) || rotation64 >= MONO_STEPS ||
                  !read_hex(&p, end, 2, &division64) || division64 < 1 || division64 > 8))
                 return 0;
-            if (version >= 8 &&
-                (!read_hex(&p, end, 2, &mute64) || mute64 > 1 ||
-                 !read_hex(&p, end, 2, &solo64) || solo64 > 1)) return 0;
+            if (version >= 8) {
+                if (!read_hex(&p, end, 2, &mute64) || mute64 > 1 ||
+                    !read_hex(&p, end, 2, &solo64)) return 0;
+                if (version >= 11) {
+                    if (solo64 > 17) return 0;
+                    keyboard_octave64 = solo64 >> 1;
+                    solo64 &= 1;
+                } else if (solo64 > 1) return 0;
+            }
             if (version >= 10) {
                 uint64_t fields[8];
                 for (int i = 0; i < 8; ++i)
@@ -2932,6 +2958,7 @@ static int compact_state_pass(mono_t *m, const char *data, const char *end,
                     t->seq_len = (int)len64;
                     t->seq_rotation = (int)rotation64;
                     t->seq_division = (int)division64;
+                    t->keyboard_octave = (int)keyboard_octave64 - 4;
                     t->arp = arp;
                     t->route = route;
                     invalidate_morph(t);
@@ -3085,7 +3112,7 @@ static void restore_state(mono_t *m, const char *json) {
     const char *tag = strstr(json, "\"data\":\"");
     if (!tag) return; /* Ignore the old display-only v1 state safely. */
     int version = json_int(json, "\"v\":", 0);
-    if (version < 2 || version > 10) return;
+    if (version < 2 || version > 11) return;
     int saved_params = version >= 5 ? MONO_PARAMS
         : (version >= 3 ? 64 : MONO_PRIMARY_PARAMS);
     int legacy_destinations = version < 4;
@@ -3459,6 +3486,25 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         t->seq_division = iclamp(v, 1, 8);
         reset_sequence_cursors(m); changed(m); return;
     }
+    if (!strcmp(key, "keyboard_octave")) {
+        int next = iclamp(v, -4, 4);
+        if (next == t->keyboard_octave) return;
+        capture_undo(m);
+        t->keyboard_octave = next;
+        /* Changing the pad map while notes are held would make their note-off
+         * events resolve to the new octave. Release the old map atomically so
+         * octave changes can never leave a performance or arp note stuck. */
+        memset(t->held_notes, 0, sizeof(t->held_notes));
+        memset(t->held_velocity, 0, sizeof(t->held_velocity));
+        memset(t->held_order, 0, sizeof(t->held_order));
+        memset(t->physical_notes, 0, sizeof(t->physical_notes));
+        t->note = -1;
+        t->gate_left = 0;
+        env_release(m, &t->amp, t->effective[11]);
+        reset_arp_runtime(t);
+        changed(m);
+        return;
+    }
     if (!strcmp(key, "track_mute")) { capture_undo(m); t->mute = v != 0; changed(m); return; }
     if (!strcmp(key, "track_solo")) { capture_undo(m); t->solo = v != 0; changed(m); return; }
     if (!strcmp(key, "track_mute_toggle")) {
@@ -3699,6 +3745,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "track_mute")) return snprintf(buf, (size_t)buf_len, "%d", t->mute);
     if (!strcmp(key, "track_solo")) return snprintf(buf, (size_t)buf_len, "%d", t->solo);
     if (!strcmp(key, "track_play_step")) return snprintf(buf, (size_t)buf_len, "%d", t->play_step);
+    if (!strcmp(key, "keyboard_octave")) return snprintf(buf, (size_t)buf_len, "%d", t->keyboard_octave);
     if (!strcmp(key, "machine")) return snprintf(buf, (size_t)buf_len, "%d", t->machine);
     int pid = param_id(m, key);
     if (pid >= 0) {
@@ -3799,7 +3846,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int n = 0;
         int shift_base = MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS;
         if (!appendf(buf, buf_len, &n,
-                     "{\"v\":10,\"track\":%d,\"page\":%d,\"step_page\":%d,"
+                     "{\"v\":11,\"track\":%d,\"page\":%d,\"step_page\":%d,"
                      "\"pattern_start\":%d,\"pattern_len\":%d,\"play_order\":%d,\"swing\":%d,"
                      "\"master\":%.0f,\"bpm_override\":%.1f,"
                      "\"machine\":%d,\"track_follow\":%d,\"track_start\":%d,"
@@ -3872,10 +3919,14 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
                          m->song[row].repeats, m->song[row].transpose + 24)) return -1;
         for (int tr = 0; tr < m->track_count; ++tr) {
             const mono_track_t *saved = &m->track[tr];
+            /* State v11 packs the signed -4..+4 keyboard octave beside the
+             * solo flag so existing dense patterns stay within the host's
+             * fixed state buffer. Bit 0 remains solo for migration. */
             if (!appendf(buf, buf_len, &n, "T%X%02X%02X%02X%02X%02X%02X%02X%02X",
                          tr, saved->machine, saved->seq_override, saved->seq_start,
                          saved->seq_len, saved->seq_rotation, saved->seq_division,
-                         saved->mute, saved->solo)) return -1;
+                         saved->mute,
+                         saved->solo | ((saved->keyboard_octave + 4) << 1))) return -1;
             if (!appendf(buf, buf_len, &n,
                          "%02X%02X%02X%02X%02X%02X%02X%02X",
                          saved->arp.enabled, saved->arp.latch, saved->arp.mode,

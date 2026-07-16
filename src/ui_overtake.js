@@ -1,7 +1,8 @@
 /* Mono — six-track machine synth and lock sequencer, full-surface UI. */
 import * as os from 'os';
 import {
-    MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight, MoveRec,
+    MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight,
+    MoveUp, MoveDown, MoveRec,
     MoveDelete, MoveCopy, MoveUndo,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
@@ -14,8 +15,10 @@ import { announce, announceParameter, announceView }
 import { openTextEntry } from '/data/UserData/schwung/shared/text_entry.mjs';
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
+const MACHINE_SHORT = ['SAW', 'PULS', 'ENS', 'SID', 'DIGI', 'FM'];
 const MACHINE_COLORS = [OrangeRed, BrightRed, YellowGreen, Purple, Cyan, Blue];
 const PAGES = ['SYNTH', 'AMP', 'FILTER', 'EFFECT', 'LFO 1', 'LFO 2', 'LFO 3'];
+const PAGE_SHORT = ['SYN', 'AMP', 'FLT', 'FX', 'L1', 'L2', 'L3'];
 const LFO_DESTS = [
     'OFF','PITCH',
     'SYN 1','SYN 2','SYN 3','SYN 4','SYN 5','SYN 6','SYN 7','TUNE',
@@ -106,6 +109,7 @@ let recordArmed = false;
 let patternStart = 0, patternLen = 16, playOrder = 0, playStep = -1;
 let swing = 0, trackFollow = true, trackStart = 0, trackLen = 16;
 let trackRotate = 0, trackDiv = 1;
+let keyboardOctave = 0;
 let trackStates = new Array(6).fill(0);
 let shift = false, deleteHeld = false, deleteUsed = false, tickCount = 0;
 let shiftVisual = false;
@@ -419,6 +423,8 @@ function fetchAll() {
     trackLen = Math.max(1, Math.min(64 - trackStart, parseInt(gp('track_len') || '16', 10) || 16));
     trackRotate = Math.max(0, Math.min(63, parseInt(gp('track_rotate') || '0', 10) || 0));
     trackDiv = Math.max(1, Math.min(8, parseInt(gp('track_div') || '1', 10) || 1));
+    keyboardOctave = Math.max(-4, Math.min(4,
+        parseInt(gp('keyboard_octave') || '0', 10) || 0));
     editStep = Math.max(0, Math.min(63, parseInt(gp('edit_step') || '0', 10) || 0));
     stepNote = parseInt(gp('step_note') || '60', 10); stepVelocity = parseInt(gp('step_velocity') || '100', 10);
     stepGate = parseInt(gp('step_gate') || '100', 10); stepMicro = parseInt(gp('step_micro') || '0', 10);
@@ -444,6 +450,32 @@ function fetchAll() {
     for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
     parseSteps();
     return true;
+}
+
+/* The playhead changes far more often than sound or pattern state. Poll its
+ * four-field runtime tuple directly so LED timing never waits behind the
+ * dozens of getters used by a full editor refresh. */
+function pollRuntime() {
+    const runtime = gp('rui_play');
+    if (runtime === null) return false;
+    const fields = runtime.split(':');
+    transport = parseInt(fields[0], 10) || 0;
+    const nextPlayStep = parseInt(fields[1], 10);
+    playStep = Number.isFinite(nextPlayStep) ? nextPlayStep : -1;
+    recordArmed = (parseInt(fields[3], 10) || 0) !== 0;
+    return true;
+}
+
+function octaveLabel() { return `O${keyboardOctave >= 0 ? '+' : ''}${keyboardOctave}`; }
+
+function setKeyboardOctave(next) {
+    next = Math.max(-4, Math.min(4, next));
+    if (next === keyboardOctave) return;
+    keyboardOctave = next;
+    host_module_set_param('keyboard_octave', `${keyboardOctave}`);
+    announceParameter('Keyboard octave', keyboardOctave === 0 ? 'Normal'
+        : `${Math.abs(keyboardOctave)} octave${Math.abs(keyboardOctave) === 1 ? '' : 's'} ${keyboardOctave > 0 ? 'up' : 'down'}`);
+    needsRedraw = true;
 }
 
 function selectTrack(next) {
@@ -698,8 +730,7 @@ function paintAll(force) { paintTracks(force); paintGlobals(force); paintSteps(f
 
 function draw() {
     clear_screen();
-    drawHeader(recordArmed ? `REC · T${track + 1} ${MACHINES[machine]}`
-                           : `MONO · T${track + 1} ${MACHINES[machine]}`);
+    drawHeader(`${recordArmed ? 'REC' : 'MONO'} T${track + 1} ${octaveLabel()} ${MACHINE_SHORT[machine]}`);
     const n = names();
     const shown = activeValues();
     const first = focusBank * 4;
@@ -709,10 +740,10 @@ function draw() {
         print(x, 18, n[i], 1);
         print(x, 34, displayValue(i, shown[i]), 1);
     }
-    drawFooter({left: `${shiftLayer() ? `SHIFT ${PAGES[page]}` : PAGES[page]} K${first + 1}-${first + 4}`,
+    drawFooter({left: `${shiftLayer() ? 'SH ' : ''}${PAGE_SHORT[page]} K${first + 1}-${first + 4}`,
                 right: heldStep ? (deleteHeld ? 'Delete+turn=clear'
                     : (shiftLayer() ? 'Shift lock' : 'turn=lock'))
-                    : `S${stepPage * 16 + 1}-${stepPage * 16 + 16}`});
+                    : `${stepPage * 16 + 1}-${stepPage * 16 + 16} BACK`});
     needsRedraw = false;
 }
 
@@ -785,7 +816,7 @@ globalThis.init = function() {
     host_module_set_param('page', '0');
     host_module_set_param('step_page', '0');
     ready = fetchAll(); paintAll(true); needsRedraw = true;
-    announceView('Mono, six track machine synth');
+    announceView('Mono, six track machine synth. Up and Down change octave. Back returns to Move.');
 };
 
 globalThis.onResume = function() {
@@ -803,12 +834,24 @@ globalThis.tick = function() {
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (!ready) ready = fetchAll();
-    if (ready && !heldStep && tickCount % 6 === 0) {
+    if (ready && !heldStep) {
         const oldPlay = playStep, oldTransport = transport, oldRecord = recordArmed;
-        fetchAll();
+        pollRuntime();
         if (oldPlay !== playStep) paintSteps(false);
-        if (oldTransport !== transport || oldRecord !== recordArmed) paintGlobals(false);
-        needsRedraw = true;
+        if (oldTransport !== transport || oldRecord !== recordArmed) {
+            paintGlobals(false); needsRedraw = true;
+        }
+        if (tickCount % 30 === 0) {
+            const oldScreen = `${machine}:${keyboardOctave}:${values.join(',')}:${altValues.join(',')}`;
+            const oldSteps = steps.join(','), oldTracks = trackStates.join(',');
+            const oldMachine = machine;
+            fetchAll();
+            if (oldScreen !== `${machine}:${keyboardOctave}:${values.join(',')}:${altValues.join(',')}`)
+                needsRedraw = true;
+            if (oldSteps !== steps.join(',')) paintSteps(false);
+            if (oldTracks !== trackStates.join(',') || oldMachine !== machine) paintTracks(false);
+            if (oldMachine !== machine) paintGlobals(false);
+        }
     }
     if (resumePaints > 0 && tickCount % 8 === 0) { paintAll(true); resumePaints--; }
     if (needsRedraw) presetMode ? drawPresetBrowser() : (seqSetup ? drawSeqSetup() : draw());
@@ -852,6 +895,10 @@ globalThis.onMidiMessageInternal = function(data) {
                 return;
             }
             if (d1 === MoveBack && d2 > 0) { closePresetBrowser(); return; }
+            return;
+        }
+        if ((d1 === MoveUp || d1 === MoveDown) && d2 > 0) {
+            setKeyboardOctave(keyboardOctave + (d1 === MoveUp ? 1 : -1));
             return;
         }
         if (d1 === MoveCopy && d2 > 0) {

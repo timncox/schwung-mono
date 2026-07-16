@@ -74,9 +74,9 @@ to full key tracking.
 Each LFO destination is a direct 0-113 enum: Off, Pitch, then parameter IDs
 0-111. Modulation of LFO parameters is fed into the following sample and
 clamped, allowing cross- and self-modulation without recursive evaluation.
-State v10 stores this direct map, per-track timing and performance state,
-machine-specific sound memories, and advanced step behavior while packing
-112-bit lock masks and 7-bit lock values compactly. State v2-v8 patches migrate
+State v11 stores this direct map, per-track timing, saved keyboard octave,
+performance state, machine-specific sound memories, and advanced step behavior
+while packing 112-bit lock masks and 7-bit lock values compactly. State v2-v8 patches migrate
 on load; v2/v3 seven-destination LFO routings are translated to the direct map,
 and v2-v8 Pulse panels/locks migrate to the corrected primary layout.
 
@@ -130,7 +130,8 @@ Each track also owns a clocked 16-step arpeggiator (six orders, latch, octave,
 gate, velocity, and pitch offsets), previous-track oscillator routing, and a
 one-second preallocated track-FX buffer. Sixteen song rows chain step windows
 with repeats and transposition. Patch morph endpoints, arp/route settings, song
-rows, microtiming, ties, and accents are part of state v10. Full-lock steps use
+rows, microtiming, ties, accents, and per-track keyboard octave are part of
+state v11. Full-lock steps use
 a dense-state flag that omits their redundant 112-bit mask, keeping worst-case
 six-track state below the host's 64 KiB channel.
 
