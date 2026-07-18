@@ -1,12 +1,7 @@
 {
-  "modules": {
-    "mono": {
-      "version": "0.3.1",
-      "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.1/mono-module.tar.gz"
-    },
-    "mono-voice": {
-      "version": "0.3.1",
-      "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.1/mono-voice-module.tar.gz"
-    }
-  }
+  "version": "0.3.1",
+  "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.1/mono-module.tar.gz",
+  "name": "Mono",
+  "description": "Six-track Elektron-style machine synth and sequencer with parameter locks, arpeggiators, routing, pattern tools, and browser editor",
+  "repo_url": "https://github.com/timncox/schwung-mono"
 }

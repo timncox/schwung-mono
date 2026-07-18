@@ -23,8 +23,8 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           VERSION="${RELEASE_VERSION#v}"
-          test "$(jq -r '.modules.mono.version' release.json)" = "$VERSION"
-          test "$(jq -r '.modules["mono-voice"].version' release.json)" = "$VERSION"
+          test "$(jq -r '.version' release.json)" = "$VERSION"
+          test "$(jq -r '.download_url' release.json)" = "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_VERSION}/mono-module.tar.gz"
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
