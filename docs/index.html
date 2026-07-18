@@ -105,6 +105,7 @@
     }
     .brand-mark i { background: var(--ink); }
     .brand-mark i:nth-child(2), .brand-mark i:nth-child(6) { background: var(--red); }
+    .top-actions { display: flex; align-items: stretch; min-width: 0; }
     nav { display: flex; overflow-x: auto; scrollbar-width: none; }
     nav a {
       display: grid;
@@ -119,6 +120,21 @@
       white-space: nowrap;
     }
     nav a:hover, nav a:focus-visible { color: var(--shell-hi); background: var(--ink); }
+    .github-link {
+      display: grid;
+      place-items: center;
+      padding: 0 14px;
+      color: var(--shell-hi);
+      background: var(--ink);
+      border-left: 1px solid var(--ink);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-decoration: none;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .github-link:hover, .github-link:focus-visible { color: var(--ink); background: var(--lcd); }
 
     .hero { padding: 42px 0 72px; }
     .hero-meta {
@@ -668,6 +684,7 @@
       .topbar .wrap { min-height: 47px; }
       nav a { padding: 0 8px; font-size: 9px; }
       nav a:nth-child(n+4) { display: none; }
+      .github-link { padding-inline: 10px; font-size: 9px; }
       .hero { padding-top: 28px; }
       .hero-meta span:last-child { text-align: right; }
       .hero-title { font-size: 29vw; }
@@ -717,6 +734,10 @@
       footer .wrap > div + div { margin-top: 12px; }
     }
 
+    @media (max-width: 430px) {
+      nav { display: none; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
@@ -732,16 +753,19 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
       MONO//6
     </a>
-    <nav aria-label="Manual sections">
-      <a href="#start">Start</a>
-      <a href="#surface">Surface</a>
-      <a href="#locks">Locks</a>
-      <a href="#save">Save</a>
-      <a href="#performance">Perform</a>
-      <a href="#pages">Pages</a>
-      <a href="#machines">Machines</a>
-      <a href="#reference">Reference</a>
-    </nav>
+    <div class="top-actions">
+      <nav aria-label="Manual sections">
+        <a href="#start">Start</a>
+        <a href="#surface">Surface</a>
+        <a href="#locks">Locks</a>
+        <a href="#save">Save</a>
+        <a href="#performance">Perform</a>
+        <a href="#pages">Pages</a>
+        <a href="#machines">Machines</a>
+        <a href="#reference">Reference</a>
+      </nav>
+      <a class="github-link" href="https://github.com/timncox/schwung-mono" target="_blank" rel="noreferrer" aria-label="Open the Mono GitHub repository in a new tab">GitHub ↗</a>
+    </div>
   </div>
 </header>
 
