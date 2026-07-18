@@ -11,6 +11,20 @@ It ships in two forms:
   64-step sequencer, per-step parameter locks, independent track timing,
   probability, retrigs, conditions, and slide.
 
+## Install from GitHub
+
+Each module has a dedicated repository so Schwung Manager's Custom GitHub
+installer can resolve one unambiguous archive:
+
+- **Mono standalone:** enter
+  `https://github.com/timncox/schwung-mono`
+- **Mono Voice:** enter
+  `https://github.com/timncox/schwung-mono-voice`
+
+In Schwung Manager, open **Modules → Custom Install → From GitHub URL** and
+paste the repository for the form you want. The two modules continue to share
+one canonical synthesis engine and source history in this repository.
+
 ## Operation manual
 
 Open the [interactive Mono manual](https://timncox.github.io/schwung-mono/) for the
