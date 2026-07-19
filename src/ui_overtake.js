@@ -12,7 +12,10 @@ import { drawMenuHeader as drawHeader, drawMenuFooter as drawFooter }
     from '/data/UserData/schwung/shared/menu_layout.mjs';
 import { announce, announceParameter, announceView }
     from '/data/UserData/schwung/shared/screen_reader.mjs';
-import { openTextEntry } from '/data/UserData/schwung/shared/text_entry.mjs';
+import {
+    openTextEntry, closeTextEntry, isTextEntryActive, handleTextEntryMidi,
+    drawTextEntry, tickTextEntry
+} from '/data/UserData/schwung/shared/text_entry.mjs';
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
 const MACHINE_SHORT = ['SAW', 'PULS', 'ENS', 'SID', 'DIGI', 'FM'];
@@ -206,8 +209,19 @@ function closePresetBrowser() {
     announceView('Mono');
 }
 
+/* A state query crosses from the UI thread to the audio host. Schwung can
+ * briefly return an empty value while the Move is busy, so use the same
+ * bounded retry policy as its native preset browser. */
+function getStateWithRetry() {
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const stateJson = gp('state');
+        if (stateJson) return stateJson;
+    }
+    return null;
+}
+
 function saveCurrentPreset(rawName) {
-    const stateJson = gp('state');
+    const stateJson = getStateWithRetry();
     if (!stateJson) { announce('Preset save failed'); return; }
     if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
     else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
@@ -221,6 +235,7 @@ function saveCurrentPreset(rawName) {
     loadPresetList();
     const found = presets.findIndex(p => p.name === name);
     presetIndex = found >= 0 ? found + 1 : 0;
+    presetMode = false;
     needsRedraw = true;
     announce(`Saved ${name}`);
 }
@@ -827,9 +842,14 @@ globalThis.onResume = function() {
  * Claim it only while Mono has an internal modal open; the host then forwards
  * the original button event to onMidiMessageInternal(), which closes the modal.
  * At the main instrument screen Back keeps its normal suspend behavior. */
-globalThis.wantsBack = function() { return presetMode || seqSetup; };
+globalThis.wantsBack = function() { return isTextEntryActive() || presetMode || seqSetup; };
 
 globalThis.tick = function() {
+    if (isTextEntryActive()) {
+        tickTextEntry();
+        drawTextEntry();
+        return;
+    }
     tickCount++;
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
@@ -858,6 +878,12 @@ globalThis.tick = function() {
 };
 
 globalThis.onMidiMessageInternal = function(data) {
+    if (isTextEntryActive()) {
+        if ((data[0] & 0xF0) === 0xB0 && data[1] === MoveShift)
+            shift = data[2] > 0;
+        handleTextEntryMidi(data);
+        return;
+    }
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
@@ -1021,4 +1047,6 @@ globalThis.onMidiMessageInternal = function(data) {
     }
 };
 
-globalThis.onUnload = function() {};
+globalThis.onUnload = function() {
+    if (isTextEntryActive()) closeTextEntry();
+};

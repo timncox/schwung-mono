@@ -660,6 +660,51 @@ static void test_pattern_window_and_play_orders(void) {
     mono_destroy(m);
 }
 
+static void test_live_pattern_length_edit_keeps_playback_position(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    mono_set_param(m, "pattern_len", "4");
+    mono_set_param(m, "track", "1");
+    mono_set_param(m, "track_start", "16");
+    mono_set_param(m, "track_len", "4");
+    mono_set_param(m, "transport", "1");
+    mono_advance_step(m);
+
+    assert(get_int(m, "play_step") == 1);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 1);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 17);
+
+    /* Expanding the global window must not clear either playhead or cause the
+     * following track to restart at step one on the next clock. */
+    mono_set_param(m, "pattern_len", "8");
+    assert(get_int(m, "transport") == 1);
+    assert(get_int(m, "play_step") == 1);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 1);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 17);
+
+    mono_advance_step(m);
+    assert(get_int(m, "play_step") == 2);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 2);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 18);
+
+    /* Shrinking around a still-valid playhead is equally continuous. */
+    mono_set_param(m, "pattern_len", "4");
+    assert(get_int(m, "play_step") == 2);
+    mono_advance_step(m);
+    assert(get_int(m, "play_step") == 3);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 3);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 19);
+    mono_destroy(m);
+}
+
 static void test_per_track_windows_rotation_division_and_swing(void) {
     mono_t *m = mono_create(&host, 2);
     assert(m);
@@ -1442,6 +1487,7 @@ int main(void) {
     test_every_secondary_page_is_audible();
     test_sequencer_and_lock();
     test_pattern_window_and_play_orders();
+    test_live_pattern_length_edit_keeps_playback_position();
     test_per_track_windows_rotation_division_and_swing();
     test_step_track_copy_paste_and_undo();
     test_step_probability_condition_retrig_and_slide_state();

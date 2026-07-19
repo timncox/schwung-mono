@@ -141,9 +141,9 @@ and wave remain stepped so automation never passes through an unintended mode.
   click the jog wheel. **Save current** captures all six sounds, all 64 steps,
   every machine variation, track timing, mute/solo state, advanced step
   settings, and every parameter lock; choosing a saved name recalls it without
-  starting transport automatically. Back closes the naming screen or preset
-  browser without leaving Mono; at the main instrument screen it resumes its
-  normal Schwung suspend behavior.
+  starting transport automatically. Confirming a save returns to Mono. Back
+  cancels the naming screen or closes the preset browser without leaving Mono;
+  at the main instrument screen it resumes its normal Schwung suspend behavior.
 
 ## Build and test
 
@@ -194,7 +194,9 @@ Knobs 5–8 set the selected track's start, length, rotation, and clock division
 Shift + turn on that bank returns it to the global window. Tap a step to set
 the focused start directly. The Remote UI shows all 64 steps together, dims
 steps outside the saved window, and exposes the same global and per-track
-timing controls.
+timing controls. Changing the global length during playback keeps the current
+playhead whenever it remains inside the resized window; it does not restart
+the sequence.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
