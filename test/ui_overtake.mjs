@@ -7,15 +7,16 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'src/ui_overtake.js'), 'utf8');
 
-const MoveKnob1 = 20;
+const MoveKnob1 = 71;
 const MoveShift = 1;
 const MoveMainKnob = 2;
 const MoveMainButton = 3;
 const MoveBack = 4;
+const MoveRec = 86;
 
 const constants = {
     MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack,
-    MoveLeft: 5, MoveRight: 6, MoveUp: 7, MoveDown: 8, MoveRec: 9,
+    MoveLeft: 5, MoveRight: 6, MoveUp: 7, MoveDown: 8, MoveRec,
     MoveDelete: 10, MoveCopy: 11, MoveUndo: 12,
     Black: 0, White: 120, LightGrey: 1, BrightRed: 4, Blue: 44,
     Green: 16, BrightGreen: 8, Cyan: 40, Purple: 48,
@@ -38,6 +39,8 @@ let stateCalls = 0;
 const savedFiles = new Map();
 const presetFiles = [];
 const announcements = [];
+const noteLedMessages = [];
+const buttonLedMessages = [];
 
 let textActive = false;
 let textOptions = null;
@@ -128,7 +131,8 @@ const modules = new Map([
     ['/data/UserData/schwung/shared/constants.mjs', synthetic(constants)],
     ['/data/UserData/schwung/shared/input_filter.mjs', synthetic({
         decodeDelta: value => value <= 63 ? value : value - 128,
-        setLED() {}
+        setLED: (note, color, force) => noteLedMessages.push({note, color, force}),
+        setButtonLED: (cc, color, force) => buttonLedMessages.push({cc, color, force})
     })],
     ['/data/UserData/schwung/shared/menu_layout.mjs', synthetic({
         drawMenuHeader() {}, drawMenuFooter() {}
@@ -156,6 +160,15 @@ const ui = context;
 ui.init();
 
 const cc = (control, value) => ui.onMidiMessageInternal([0xb0, control, value]);
+
+noteLedMessages.length = 0;
+buttonLedMessages.length = 0;
+cc(MoveRec, 127);
+assert.deepEqual(buttonLedMessages.at(-1), {cc: MoveRec, color: constants.BrightRed, force: false},
+    'record arm must light the Record button through its CC LED');
+assert.equal(noteLedMessages.some(message => message.note === MoveRec), false,
+    'record arm must never light pad note 86');
+
 const openSaveKeyboard = () => {
     cc(MoveShift, 127);
     cc(MoveMainButton, 127);
@@ -195,5 +208,7 @@ openSaveKeyboard();
 ui.onUnload();
 assert.equal(textActive, false, 'unload must close active text entry');
 assert.equal(textCloseCalls, 1);
+assert.deepEqual(buttonLedMessages.at(-1), {cc: MoveRec, color: constants.Black, force: true},
+    'unload must clear the Record button');
 
 console.log('mono overtake UI: preset save and navigation tests passed');

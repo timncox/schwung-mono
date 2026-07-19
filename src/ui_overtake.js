@@ -7,7 +7,8 @@ import {
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
-import { decodeDelta, setLED } from '/data/UserData/schwung/shared/input_filter.mjs';
+import { decodeDelta, setLED, setButtonLED }
+    from '/data/UserData/schwung/shared/input_filter.mjs';
 import { drawMenuHeader as drawHeader, drawMenuFooter as drawFooter }
     from '/data/UserData/schwung/shared/menu_layout.mjs';
 import { announce, announceParameter, announceView }
@@ -704,7 +705,7 @@ function paintTracks(force) {
 function paintGlobals(force) {
     setLED(PAD_MACHINE, MACHINE_COLORS[machine], force);
     setLED(PAD_TRANSPORT, transport ? Green : LightGrey, force);
-    setLED(MoveRec, recordArmed ? BrightRed : Black, force);
+    setButtonLED(MoveRec, recordArmed ? BrightRed : Black, force);
 }
 
 function paintSteps(force) {
@@ -1049,4 +1050,5 @@ globalThis.onMidiMessageInternal = function(data) {
 
 globalThis.onUnload = function() {
     if (isTextEntryActive()) closeTextEntry();
+    setButtonLED(MoveRec, Black, true);
 };
