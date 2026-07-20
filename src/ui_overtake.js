@@ -7,12 +7,16 @@ import {
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
 } from '/data/UserData/schwung/shared/constants.mjs';
-import { decodeDelta, setLED } from '/data/UserData/schwung/shared/input_filter.mjs';
+import { decodeDelta, setLED, setButtonLED }
+    from '/data/UserData/schwung/shared/input_filter.mjs';
 import { drawMenuHeader as drawHeader, drawMenuFooter as drawFooter }
     from '/data/UserData/schwung/shared/menu_layout.mjs';
 import { announce, announceParameter, announceView }
     from '/data/UserData/schwung/shared/screen_reader.mjs';
-import { openTextEntry } from '/data/UserData/schwung/shared/text_entry.mjs';
+import {
+    openTextEntry, closeTextEntry, isTextEntryActive, handleTextEntryMidi,
+    drawTextEntry, tickTextEntry
+} from '/data/UserData/schwung/shared/text_entry.mjs';
 
 const MACHINES = ['SW SAW', 'SW PULS', 'SW ENS', 'SID6581', 'DIGIPRO', 'FM+STAT'];
 const MACHINE_SHORT = ['SAW', 'PULS', 'ENS', 'SID', 'DIGI', 'FM'];
@@ -206,8 +210,19 @@ function closePresetBrowser() {
     announceView('Mono');
 }
 
+/* A state query crosses from the UI thread to the audio host. Schwung can
+ * briefly return an empty value while the Move is busy, so use the same
+ * bounded retry policy as its native preset browser. */
+function getStateWithRetry() {
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const stateJson = gp('state');
+        if (stateJson) return stateJson;
+    }
+    return null;
+}
+
 function saveCurrentPreset(rawName) {
-    const stateJson = gp('state');
+    const stateJson = getStateWithRetry();
     if (!stateJson) { announce('Preset save failed'); return; }
     if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
     else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
@@ -221,6 +236,7 @@ function saveCurrentPreset(rawName) {
     loadPresetList();
     const found = presets.findIndex(p => p.name === name);
     presetIndex = found >= 0 ? found + 1 : 0;
+    presetMode = false;
     needsRedraw = true;
     announce(`Saved ${name}`);
 }
@@ -608,8 +624,13 @@ function adjustSetup(i, delta) {
         return;
     }
     if (setupPage === 3) {
+        if (track === 0 && i < 2) {
+            announce('Track 1 has no previous routing source. Select Track 2 through 6.');
+            needsRedraw = true;
+            return;
+        }
         const keys = ['route_mode','route_amount','track_fx_type','track_fx_amount','track_fx_tone','track_fx_feedback','track_fx_mix','track_level'];
-        const labels = ['Route','Route amount','Track effect','Effect amount','Tone','Feedback','Mix','Level'];
+        const labels = [`Input from Track ${track}`,'Input depth','Track effect','Effect amount','Tone','Feedback','Mix','Level'];
         const values = [routeMode,routeAmount,trackFxType,trackFxAmount,trackFxTone,trackFxFeedback,trackFxMix,trackLevel];
         const max = [4,127,6,127,127,127,127,127];
         setSetupValue(keys[i], Math.max(0, Math.min(max[i], values[i] + delta)), labels[i]);
@@ -689,7 +710,7 @@ function paintTracks(force) {
 function paintGlobals(force) {
     setLED(PAD_MACHINE, MACHINE_COLORS[machine], force);
     setLED(PAD_TRANSPORT, transport ? Green : LightGrey, force);
-    setLED(MoveRec, recordArmed ? BrightRed : Black, force);
+    setButtonLED(MoveRec, recordArmed ? BrightRed : Black, force);
 }
 
 function paintSteps(force) {
@@ -790,10 +811,12 @@ function drawSeqSetup() {
             shiftLayer() ? (arpVelocity ? `${arpVelocity}` : 'PLAY') : `${arpOffsets[setupIndex] >= 0 ? '+' : ''}${arpOffsets[setupIndex]}`];
         footerLeft = `ARP STEP ${String(setupIndex + 1).padStart(2, '0')}`; footerRight = 'Pads select · Shift K8 velocity';
     } else if (setupPage === 3) {
-        labels = ['ROUTE','RAMT','FX','FAMT','TONE','FDBK','MIX','LEVEL'];
-        shown = [ROUTE_SCREEN[routeMode], `${routeAmount}`, TRACK_FX_SCREEN[trackFxType], `${trackFxAmount}`,
+        labels = ['INPUT','DEPTH','FX','FAMT','TONE','FDBK','MIX','LEVEL'];
+        shown = [track ? ROUTE_SCREEN[routeMode] : 'NONE', track ? `${routeAmount}` : '--',
+            TRACK_FX_SCREEN[trackFxType], `${trackFxAmount}`,
             `${trackFxTone}`, `${trackFxFeedback}`, `${trackFxMix}`, `${trackLevel}`];
-        footerLeft = `T${track + 1} · FROM T${track || '-'}`; footerRight = 'Neighbor then track FX';
+        footerLeft = track ? `T${track + 1} <- T${track}` : 'T1 NO SRC';
+        footerRight = track ? `${ROUTE_SCREEN[routeMode]} K1/2` : 'Use T2-T6';
     } else {
         labels = ['SONG','ROWS','EDIT','START','LEN','REPEAT','TRANS','PLAY'];
         shown = [songEnabled ? 'ON' : 'OFF', `${songLength}`, `${songEditRow + 1}`,
@@ -827,9 +850,14 @@ globalThis.onResume = function() {
  * Claim it only while Mono has an internal modal open; the host then forwards
  * the original button event to onMidiMessageInternal(), which closes the modal.
  * At the main instrument screen Back keeps its normal suspend behavior. */
-globalThis.wantsBack = function() { return presetMode || seqSetup; };
+globalThis.wantsBack = function() { return isTextEntryActive() || presetMode || seqSetup; };
 
 globalThis.tick = function() {
+    if (isTextEntryActive()) {
+        tickTextEntry();
+        drawTextEntry();
+        return;
+    }
     tickCount++;
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
@@ -858,6 +886,12 @@ globalThis.tick = function() {
 };
 
 globalThis.onMidiMessageInternal = function(data) {
+    if (isTextEntryActive()) {
+        if ((data[0] & 0xF0) === 0xB0 && data[1] === MoveShift)
+            shift = data[2] > 0;
+        handleTextEntryMidi(data);
+        return;
+    }
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
@@ -1021,4 +1055,7 @@ globalThis.onMidiMessageInternal = function(data) {
     }
 };
 
-globalThis.onUnload = function() {};
+globalThis.onUnload = function() {
+    if (isTextEntryActive()) closeTextEntry();
+    setButtonLED(MoveRec, Black, true);
+};

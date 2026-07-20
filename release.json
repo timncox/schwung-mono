@@ -1,7 +1,23 @@
 {
-  "version": "0.3.1",
-  "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.1/mono-module.tar.gz",
+  "version": "0.3.2",
+  "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.2/mono-module.tar.gz",
   "name": "Mono",
   "description": "Six-track Elektron-style machine synth and sequencer with parameter locks, arpeggiators, routing, pattern tools, and browser editor",
-  "repo_url": "https://github.com/timncox/schwung-mono"
+  "repo_url": "https://github.com/timncox/schwung-mono",
+  "modules": {
+    "mono": {
+      "version": "0.3.2",
+      "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.2/mono-module.tar.gz",
+      "name": "Mono",
+      "description": "Six-track Elektron-style machine synth and sequencer with parameter locks, arpeggiators, routing, pattern tools, and browser editor",
+      "repo_url": "https://github.com/timncox/schwung-mono"
+    },
+    "mono-voice": {
+      "version": "0.3.2",
+      "download_url": "https://github.com/timncox/schwung-mono/releases/download/v0.3.2/mono-voice-module.tar.gz",
+      "name": "Mono Voice",
+      "description": "Elektron-style digital machine synth voice with SuperWave, SID, DigiPRO, FM, deep modulation, and arp latch",
+      "repo_url": "https://github.com/timncox/schwung-mono"
+    }
+  }
 }

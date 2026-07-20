@@ -87,9 +87,14 @@
         "Shift + knob 8 sets",
         "fixed velocity.",
         "",
-        "Routing mixes the",
-        "previous track before",
-        "filter and track FX."
+        "Set routing on the",
+        "receiving track:",
+        "T2 gets T1, T3 gets",
+        "T2, and so on.",
+        "Track 1 has no source.",
+        "Trigger the source; it",
+        "may be muted while it",
+        "still modulates FM."
       ]
     },
     {
@@ -178,6 +183,8 @@
         "step behavior,",
         "mutes and locks.",
         "",
+        "Confirm saves and",
+        "returns to Mono.",
         "Back closes preset",
         "and setup screens."
       ]

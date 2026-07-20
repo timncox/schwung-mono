@@ -1,6 +1,6 @@
 ---
 status: active
-last_touched: 2026-07-18
+last_touched: 2026-07-20
 deploy: scripts/deploy.sh
 ---
 
@@ -19,6 +19,9 @@ tool, both backed by `src/mono_core.c`.
 - Keep the DSP implementation clean-room. Do not add Elektron firmware,
   factory wavetables, factory samples, or copied visual assets.
 - `make arm` stages and cross-compiles both module archives with Docker.
+- One tag publishes both archives. Keep the top-level `release.json` fields as
+  the Custom GitHub fallback for `mono`, and keep its `modules` entries aligned
+  with the `mono` and `mono-voice` catalog IDs.
 - `scripts/deploy.sh` writes to Move hardware. Do not run it without explicit
   deployment authorization.
 

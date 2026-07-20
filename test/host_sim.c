@@ -660,6 +660,51 @@ static void test_pattern_window_and_play_orders(void) {
     mono_destroy(m);
 }
 
+static void test_live_pattern_length_edit_keeps_playback_position(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    mono_set_param(m, "pattern_len", "4");
+    mono_set_param(m, "track", "1");
+    mono_set_param(m, "track_start", "16");
+    mono_set_param(m, "track_len", "4");
+    mono_set_param(m, "transport", "1");
+    mono_advance_step(m);
+
+    assert(get_int(m, "play_step") == 1);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 1);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 17);
+
+    /* Expanding the global window must not clear either playhead or cause the
+     * following track to restart at step one on the next clock. */
+    mono_set_param(m, "pattern_len", "8");
+    assert(get_int(m, "transport") == 1);
+    assert(get_int(m, "play_step") == 1);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 1);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 17);
+
+    mono_advance_step(m);
+    assert(get_int(m, "play_step") == 2);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 2);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 18);
+
+    /* Shrinking around a still-valid playhead is equally continuous. */
+    mono_set_param(m, "pattern_len", "4");
+    assert(get_int(m, "play_step") == 2);
+    mono_advance_step(m);
+    assert(get_int(m, "play_step") == 3);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "track_play_step") == 3);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "track_play_step") == 19);
+    mono_destroy(m);
+}
+
 static void test_per_track_windows_rotation_division_and_swing(void) {
     mono_t *m = mono_create(&host, 2);
     assert(m);
@@ -1360,7 +1405,9 @@ static void test_user_wave_upload_and_persistence(void) {
 static void test_neighbor_routing_and_track_fx(void) {
     mono_t *plain = mono_create(&host, 2);
     mono_t *routed = mono_create(&host, 2);
-    assert(plain && routed);
+    mono_t *fm_plain = mono_create(&host, 2);
+    mono_t *fm_routed = mono_create(&host, 2);
+    assert(plain && routed && fm_plain && fm_routed);
     mono_note_on(plain, 0, 48, 110);
     mono_note_on(plain, 1, 55, 110);
     mono_note_on(routed, 0, 48, 110);
@@ -1373,8 +1420,24 @@ static void test_neighbor_routing_and_track_fx(void) {
     mono_set_param(routed, "track_fx_tone", "20");
     mono_set_param(routed, "track_fx_mix", "127");
     assert(render_hash_long(plain) != render_hash_long(routed));
+
+    /* FM is configured on the receiving track. A muted preceding track still
+     * runs as a modulation source, which lets the performer hear the carrier
+     * alone without breaking the routing graph. */
+    mono_note_on(fm_plain, 0, 48, 110);
+    mono_note_on(fm_plain, 1, 55, 110);
+    mono_note_on(fm_routed, 0, 48, 110);
+    mono_note_on(fm_routed, 1, 55, 110);
+    mono_set_param(fm_plain, "track_mute", "1");
+    mono_set_param(fm_routed, "track_mute", "1");
+    mono_set_param(fm_routed, "track", "1");
+    mono_set_param(fm_routed, "route_mode", "4");
+    mono_set_param(fm_routed, "route_amount", "127");
+    assert(render_hash_long(fm_plain) != render_hash_long(fm_routed));
     mono_destroy(plain);
     mono_destroy(routed);
+    mono_destroy(fm_plain);
+    mono_destroy(fm_routed);
 }
 
 static void test_microtiming_accent_ties_and_song_mode(void) {
@@ -1442,6 +1505,7 @@ int main(void) {
     test_every_secondary_page_is_audible();
     test_sequencer_and_lock();
     test_pattern_window_and_play_orders();
+    test_live_pattern_length_edit_keeps_playback_position();
     test_per_track_windows_rotation_division_and_swing();
     test_step_track_copy_paste_and_undo();
     test_step_probability_condition_retrig_and_slide_state();

@@ -2153,6 +2153,56 @@ static void reset_sequence_cursors(mono_t *m) {
     m->song_step_count = 0;
 }
 
+/* Changing the global length is a live performance edit, not a transport
+ * restart. Keep the current step/cursor when it still belongs to the resized
+ * window and discard only look-ahead work calculated with the old length.
+ * Tracks with their own timing window and active song playback are unaffected. */
+static void reconcile_pattern_length_edit(mono_t *m) {
+    if (!m->transport || m->song_enabled) return;
+    int first = m->pattern_start;
+    int end = first + m->pattern_len;
+    for (int ti = 0; ti < m->track_count; ++ti) {
+        mono_track_t *t = &m->track[ti];
+        if (t->seq_override) continue;
+        int next_cursor = -1;
+        if (m->play_order != MONO_PLAY_RANDOM) {
+            if (t->seq_cursor < 0 || t->seq_cursor >= m->pattern_len) {
+                next_cursor = m->play_order == MONO_PLAY_REVERSE
+                    ? m->pattern_len - 1 : 0;
+            } else if (m->play_order == MONO_PLAY_REVERSE) {
+                next_cursor = t->seq_cursor > 0
+                    ? t->seq_cursor - 1 : m->pattern_len - 1;
+            } else if (m->play_order == MONO_PLAY_PENDULUM) {
+                if (m->pattern_len <= 1) next_cursor = 0;
+                else {
+                    next_cursor = t->seq_cursor + t->seq_direction;
+                    if (next_cursor >= m->pattern_len)
+                        next_cursor = m->pattern_len - 2;
+                    else if (next_cursor < 0) next_cursor = 1;
+                }
+            } else {
+                next_cursor = (t->seq_cursor + 1) % m->pattern_len;
+            }
+        }
+        int next_step = next_cursor < 0 ? -1
+            : first + (next_cursor + t->seq_rotation) % m->pattern_len;
+        if (t->queued_valid && t->seq_due_count > 0) --t->seq_due_count;
+        t->queued_valid = 0;
+        if (t->early_fired_step != next_step) t->early_fired_step = -1;
+        if (t->seq_cursor >= m->pattern_len) {
+            t->seq_cursor = -1;
+            t->seq_direction = 1;
+        }
+        for (int event = 0; event < 2; ++event) {
+            mono_seq_event_t *queued = &t->seq_event[event];
+            if (queued->valid &&
+                (queued->step < first || queued->step >= end ||
+                 (queued->early && queued->step != next_step)))
+                queued->valid = 0;
+        }
+    }
+}
+
 static void apply_edit_snapshot(mono_t *m, const mono_edit_snapshot_t *snapshot) {
     m->pattern_start = snapshot->pattern_start;
     m->pattern_len = snapshot->pattern_len;
@@ -3219,7 +3269,7 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
     if (!strcmp(key, "pattern_len")) {
         capture_undo(m);
         m->pattern_len = iclamp(v, 1, MONO_STEPS - m->pattern_start);
-        reset_sequence_cursors(m);
+        reconcile_pattern_length_edit(m);
         changed(m);
         return;
     }

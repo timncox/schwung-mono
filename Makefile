@@ -2,10 +2,13 @@ CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wpedantic -Iinclude -Isrc
 LDLIBS = -lm
 
-.PHONY: test bench sanitize arm clean
+.PHONY: test test-ui bench sanitize arm clean
 
-test: build/host_sim
+test: build/host_sim test-ui
 	./build/host_sim
+
+test-ui:
+	node --no-warnings --experimental-vm-modules test/ui_overtake.mjs
 
 build/host_sim: src/mono_core.c src/mono_core.h test/host_sim.c include/plugin_api_v1.h
 	@mkdir -p build

@@ -25,6 +25,12 @@ jobs:
           VERSION="${RELEASE_VERSION#v}"
           test "$(jq -r '.version' release.json)" = "$VERSION"
           test "$(jq -r '.download_url' release.json)" = "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_VERSION}/mono-module.tar.gz"
+          for ID in mono mono-voice; do
+            test "$(jq -r --arg id "$ID" '.modules[$id].version' release.json)" = "$VERSION"
+            test "$(jq -r --arg id "$ID" '.modules[$id].download_url' release.json)" = "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_VERSION}/${ID}-module.tar.gz"
+          done
+          test "$(jq -r '.version' modules/overtake/mono/module.json)" = "$VERSION"
+          test "$(jq -r '.version' modules/sound_generators/mono-voice/module.json)" = "$VERSION"
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2

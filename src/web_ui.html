@@ -153,10 +153,10 @@
         <div class="feature-row"><label>OCT <input id="arpOctaves" type="number" min="1" max="4"></label><label>GATE <input id="arpGate" type="number" min="1" max="127"></label><label>LENGTH <input id="arpLength" type="number" min="1" max="16"></label><label>VELOCITY <input id="arpVelocity" type="number" min="0" max="127"></label></div>
         <div class="arp-offsets" id="arpOffsets"></div>
       </div>
-      <div class="feature"><h2>NEIGHBOR ROUTING / TRACK FX</h2>
-        <div class="feature-row"><label>ROUTE <select id="routeMode"></select></label><label>AMOUNT <input id="routeAmount" type="number" min="0" max="127"></label><label>FX <select id="trackFxType"></select></label></div>
+      <div class="feature" id="routingFeature"><h2>NEIGHBOR ROUTING / TRACK FX</h2>
+        <div class="feature-row"><label>ROUTE <select id="routeMode"></select></label><label>DEPTH <input id="routeAmount" type="number" min="0" max="127"></label><label>FX <select id="trackFxType"></select></label></div>
         <div class="feature-row"><label>AMOUNT <input id="trackFxAmount" type="number" min="0" max="127"></label><label>TONE <input id="trackFxTone" type="number" min="0" max="127"></label><label>FEEDBACK <input id="trackFxFeedback" type="number" min="0" max="127"></label><label>MIX <input id="trackFxMix" type="number" min="0" max="127"></label><label>LEVEL <input id="trackLevel" type="number" min="0" max="127"></label></div>
-        <div class="hint">A track can mix, replace, ring-modulate, or frequency-modulate its oscillator with the previous track before its own filter and dedicated FX.</div>
+        <div class="hint" id="routingHint">Set routing on the receiving track. Track 2 receives Track 1, Track 3 receives Track 2, and so on.</div>
       </div>
       <div class="feature"><h2>DIGIPRO USER WAVES</h2>
         <div class="feature-row"><label>SLOT <select id="waveSlot"></select></label><input id="waveFile" type="file" accept="audio/*,.wav"><button id="uploadWave">LOAD AUDIO</button><button id="clearWave">CLEAR SLOT</button></div>
@@ -527,6 +527,13 @@ function render() {
   el("arpLatch").classList.toggle("active",!!number("arp_latch"));el("arpLatch").textContent=number("arp_latch")?"LATCH ON":"LATCH OFF";
   [["arpMode","arp_mode"],["arpRate","arp_rate"],["routeMode","route_mode"],["trackFxType","track_fx_type"],["calibrationMode","calibration_mode"]].forEach(([id,key])=>{if(document.activeElement!==el(id))el(id).value=String(number(key));});
   [["arpOctaves","arp_octaves",1],["arpGate","arp_gate",92],["arpLength","arp_length",16],["arpVelocity","arp_velocity",0],["routeAmount","route_amount",0],["trackFxAmount","track_fx_amount",0],["trackFxTone","track_fx_tone",0],["trackFxFeedback","track_fx_feedback",0],["trackFxMix","track_fx_mix",0],["trackLevel","track_level",64],["calibrationLevel","calibration_level",32]].forEach(([id,key,fallback])=>{if(document.activeElement!==el(id))el(id).value=number(key,fallback);});
+  const hasNeighbor=!voice&&track>0;
+  el("routeMode").disabled=!hasNeighbor;el("routeAmount").disabled=!hasNeighbor;
+  el("routingHint").textContent=voice
+    ? "Neighbor routing needs six-track Mono; Track FX remain available for Mono Voice."
+    : track===0
+      ? "Track 1 has no preceding source. Select Track 2–6 for neighbor routing; Track FX remain available."
+      : `T${track+1} receives T${track}. Trigger T${track}, choose a route, and raise Depth. T${track} may be muted while it continues to modulate.`;
   const offsets=String(M.arp_offsets||"").split(",").map(Number);[...el("arpOffsets").querySelectorAll("input")].forEach((input,i)=>{if(document.activeElement!==input)input.value=offsets[i]||0;});
   const waveMask=number("user_wave_mask");el("waveStatus").textContent=`Installed slots: ${waveMask?[0,1,2,3,4,5,6,7].filter(i=>(waveMask>>i)&1).map(i=>`User ${i+1}`).join(", "):"none"}. Choose audio to replace a slot.`;
   el("songEnabled").classList.toggle("active",!!number("song_enabled"));el("songEnabled").textContent=number("song_enabled")?"SONG ON":"SONG OFF";

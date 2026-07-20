@@ -3,7 +3,7 @@
 Mono is a clean-room, Monomachine-inspired digital instrument for Ableton
 Move, built as a [Schwung](https://github.com/charlesvestal/schwung) module.
 
-It ships in two forms:
+It ships as a two-module suite from one source tree and one GitHub release:
 
 - **Mono Voice** (`mono-voice`) — one machine voice inside a normal Move
   track, using Move's pads and sequencer.
@@ -13,8 +13,10 @@ It ships in two forms:
 
 ## Install from GitHub
 
-Each module has a dedicated repository so Schwung Manager's Custom GitHub
-installer can resolve one unambiguous archive:
+Schwung's Module Store resolves both modules from this repository's
+multi-module release manifest. Schwung Manager's Custom GitHub installer does
+not yet offer a module picker, so the canonical repository defaults to Mono
+standalone and Mono Voice keeps a dedicated compatibility repository:
 
 - **Mono standalone:** enter
   `https://github.com/timncox/schwung-mono`
@@ -22,8 +24,9 @@ installer can resolve one unambiguous archive:
   `https://github.com/timncox/schwung-mono-voice`
 
 In Schwung Manager, open **Modules → Custom Install → From GitHub URL** and
-paste the repository for the form you want. The two modules continue to share
-one canonical synthesis engine and source history in this repository.
+paste the repository for the form you want. Both archives are built and
+published together from this canonical repository; the Mono Voice repository
+only mirrors its archive for direct installs.
 
 ## Operation manual
 
@@ -106,9 +109,13 @@ panels and their parameter locks to the corrected control layout.
 - **DigiPRO user waves:** eight persistent 512-sample slots shared by Mono and
   Mono Voice. Remote UI imports an audio file; the engine DC-centers,
   normalizes, and 12-bit quantizes it before an atomic bank save.
-- **Neighbor and track FX:** each track can mix, replace, ring-modulate, or FM
-  its oscillator from the preceding track, then use dedicated chorus, flanger,
-  ring modulation, reverb, compression, or crushing.
+- **Neighbor and track FX:** routing is set on the receiving track: Track 2
+  receives Track 1, Track 3 receives Track 2, and so on. The receiving track
+  can mix, replace, ring-modulate, or FM its oscillator from that preceding
+  voice, then use dedicated chorus, flanger, ring modulation, reverb,
+  compression, or crushing. The source must be triggered, but it can be muted
+  from the final mix while continuing to modulate the receiver. Track 1 has no
+  preceding source.
 - **Deeper sequencing:** every step adds ±23/48-step microtiming, tie, and
   accent. Sixteen song rows chain arbitrary windows with repeats and ±24
   semitone transposition.
@@ -141,9 +148,9 @@ and wave remain stepped so automation never passes through an unintended mode.
   click the jog wheel. **Save current** captures all six sounds, all 64 steps,
   every machine variation, track timing, mute/solo state, advanced step
   settings, and every parameter lock; choosing a saved name recalls it without
-  starting transport automatically. Back closes the naming screen or preset
-  browser without leaving Mono; at the main instrument screen it resumes its
-  normal Schwung suspend behavior.
+  starting transport automatically. Confirming a save returns to Mono. Back
+  cancels the naming screen or closes the preset browser without leaving Mono;
+  at the main instrument screen it resumes its normal Schwung suspend behavior.
 
 ## Build and test
 
@@ -194,7 +201,9 @@ Knobs 5–8 set the selected track's start, length, rotation, and clock division
 Shift + turn on that bank returns it to the global window. Tap a step to set
 the focused start directly. The Remote UI shows all 64 steps together, dims
 steps outside the saved window, and exposes the same global and per-track
-timing controls.
+timing controls. Changing the global length during playback keeps the current
+playhead whenever it remains inside the resized window; it does not restart
+the sequence.
 
 The Move display shows four parameters at a time. Touching knobs 1–4 or 5–8
 automatically focuses that bank, while all eight knobs remain active. Schwung's
