@@ -13,10 +13,15 @@ const MoveMainKnob = 2;
 const MoveMainButton = 3;
 const MoveBack = 4;
 const MoveRec = 86;
+const MoveMute = 88;
+const MoveLeft = 5;
+const MoveRight = 6;
+const PAD_MACHINE = 98;
+const TRACK_PAD_1 = 92;
 
 const constants = {
     MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack,
-    MoveLeft: 5, MoveRight: 6, MoveUp: 7, MoveDown: 8, MoveRec,
+    MoveLeft, MoveRight, MoveUp: 7, MoveDown: 8, MoveRec, MoveMute,
     MoveDelete: 10, MoveCopy: 11, MoveUndo: 12,
     Black: 0, White: 120, LightGrey: 1, BrightRed: 4, Blue: 44,
     Green: 16, BrightGreen: 8, Cyan: 40, Purple: 48,
@@ -48,6 +53,7 @@ let textMidiCalls = 0;
 let textTickCalls = 0;
 let textDrawCalls = 0;
 let textCloseCalls = 0;
+let suspendCalls = 0;
 
 const textEntry = {
     openTextEntry(options) {
@@ -117,7 +123,8 @@ const context = vm.createContext({
     host_module_set_param_blocking(key, value) { params.set(key, String(value)); },
     host_ensure_dir() { return true; },
     host_write_file(file, payload) { savedFiles.set(file, payload); return true; },
-    host_read_file(file) { return savedFiles.get(file); }
+    host_read_file(file) { return savedFiles.get(file); },
+    host_suspend_overtake() { suspendCalls++; }
 });
 
 function synthetic(exports) {
@@ -161,6 +168,7 @@ ui.init();
 
 const cc = (control, value) => ui.onMidiMessageInternal([0xb0, control, value]);
 const noteOn = (note, velocity = 100) => ui.onMidiMessageInternal([0x90, note, velocity]);
+const noteOff = note => ui.onMidiMessageInternal([0x80, note, 0]);
 
 noteLedMessages.length = 0;
 buttonLedMessages.length = 0;
@@ -184,6 +192,49 @@ assert.equal(params.get('route_mode'), '4',
     'Track 2 must accept FM from Track 1 on the receiving track');
 assert(announcements.at(-1).includes('Input from Track 1'));
 cc(MoveBack, 127);
+
+noteOn(16);
+cc(MoveRec, 127);
+noteOff(16);
+assert.equal(params.get('clear_step'), '1:0',
+    'held step + Record must clear a step when Delete is owned by Move');
+
+noteOn(17);
+noteOn(PAD_MACHINE);
+noteOff(17);
+assert.equal(params.get('copy_step'), '1:1',
+    'held step + Machine must copy a step when Copy is owned by Move');
+
+noteOn(18);
+cc(MoveShift, 127);
+noteOn(PAD_MACHINE);
+cc(MoveShift, 0);
+noteOff(18);
+assert.equal(params.get('paste_step'), '1:2',
+    'held step + Shift + Machine must paste a step when Copy is owned by Move');
+
+cc(MoveShift, 127);
+cc(MoveLeft, 127);
+cc(MoveRight, 127);
+cc(MoveShift, 0);
+assert.equal(params.get('copy_track'), '1', 'Shift + Left must copy the selected track');
+assert.equal(params.get('paste_track'), '1', 'Shift + Right must paste the selected track');
+
+cc(MoveShift, 127);
+cc(MoveRec, 127);
+cc(MoveShift, 0);
+assert.equal(params.get('undo'), '1', 'Shift + Record must provide an Undo fallback');
+
+cc(MoveMute, 127);
+noteOn(TRACK_PAD_1);
+cc(MoveMute, 0);
+assert.equal(params.get('track_mute_toggle'), '0', 'Mute + track pad must toggle track mute');
+cc(MoveShift, 127);
+cc(MoveMute, 127);
+noteOn(TRACK_PAD_1);
+cc(MoveMute, 0);
+cc(MoveShift, 0);
+assert.equal(params.get('track_solo_toggle'), '0', 'Shift + Mute + track pad must toggle track solo');
 
 const openSaveKeyboard = () => {
     cc(MoveShift, 127);
@@ -219,6 +270,25 @@ assert.equal(saved.name, 'Feedback Fix');
 assert.equal(saved.module, 'mono');
 assert.deepEqual(saved.state, {v: 11, data: 'test'});
 assert(announcements.includes('Saved Feedback Fix'));
+
+cc(MoveShift, 127);
+cc(MoveMainButton, 127);
+cc(MoveShift, 0);
+cc(MoveMainKnob, 1);
+cc(MoveShift, 127);
+cc(MoveLeft, 127);
+cc(MoveLeft, 127);
+cc(MoveShift, 0);
+assert.equal(presetFiles.length, 0, 'Shift + Left must confirm-delete a preset without Move Delete');
+cc(MoveBack, 127);
+
+cc(MoveBack, 127);
+assert.equal(suspendCalls, 1, 'Back at the main screen must park a self-managed overtake');
+
+const monoManifest = JSON.parse(fs.readFileSync(
+    path.join(root, 'modules/overtake/mono/module.json'), 'utf8'));
+assert.equal(monoManifest.capabilities.suspend_self_managed, true,
+    'Mono must opt into Schwung 0.11.6 self-managed Back handling');
 
 openSaveKeyboard();
 ui.onUnload();

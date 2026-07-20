@@ -2,7 +2,7 @@
 import * as os from 'os';
 import {
     MoveKnob1, MoveShift, MoveMainKnob, MoveMainButton, MoveBack, MoveLeft, MoveRight,
-    MoveUp, MoveDown, MoveRec,
+    MoveUp, MoveDown, MoveRec, MoveMute,
     MoveDelete, MoveCopy, MoveUndo,
     Black, White, LightGrey, BrightRed, Blue, Green, BrightGreen,
     Cyan, Purple, YellowGreen, OrangeRed
@@ -115,7 +115,7 @@ let swing = 0, trackFollow = true, trackStart = 0, trackLen = 16;
 let trackRotate = 0, trackDiv = 1;
 let keyboardOctave = 0;
 let trackStates = new Array(6).fill(0);
-let shift = false, deleteHeld = false, deleteUsed = false, tickCount = 0;
+let shift = false, deleteHeld = false, muteHeld = false, deleteUsed = false, tickCount = 0;
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let altValues = new Array(8).fill(0);
@@ -139,6 +139,38 @@ const TRACK_FX_SCREEN = ['OFF', 'CHOR', 'FLNG', 'RING', 'RVRB', 'COMP', 'CRSH'];
 function gp(key) {
     const v = host_module_get_param(key);
     return v === null || v === undefined ? null : String(v);
+}
+
+function suspendMono() {
+    if (typeof host_suspend_overtake === 'function') host_suspend_overtake();
+    else if (typeof host_exit_module === 'function') host_exit_module();
+}
+
+function copyOrPasteStep(paste) {
+    if (!heldStep) return;
+    heldStep.used = true;
+    host_module_set_param(paste ? 'paste_step' : 'copy_step', `${track}:${heldStep.step}`);
+    announce(`${paste ? 'Pasted' : 'Copied'} step ${heldStep.step + 1}`);
+    needsRedraw = true;
+}
+
+function copyOrPasteTrack(paste) {
+    host_module_set_param(paste ? 'paste_track' : 'copy_track', `${track}`);
+    if (paste) { fetchAll(); paintAll(false); }
+    announce(`${paste ? 'Pasted' : 'Copied'} track ${track + 1}`);
+    needsRedraw = true;
+}
+
+function undoLastEdit() {
+    host_module_set_param('undo', '1');
+    fetchAll(); paintAll(false); needsRedraw = true; announce('Undo');
+}
+
+function clearHeldStep() {
+    if (!heldStep) return;
+    host_module_set_param('clear_step', `${track}:${heldStep.step}`);
+    heldStep.used = true; parseSteps(); paintSteps(false); needsRedraw = true;
+    announce(`Cleared step ${heldStep.step + 1}`);
 }
 
 function safePresetStem(name) {
@@ -780,7 +812,7 @@ function drawPresetBrowser() {
         const label = `${selected ? '> ' : '  '}${rows[index]}`.slice(0, 20);
         print(3, y, label, selected ? 0 : 1);
     }
-    drawFooter({left: deletePresetFile ? 'Delete again' : 'Back · Delete',
+    drawFooter({left: deletePresetFile ? 'Delete again' : 'Back · Sh+Left del',
                 right: 'Click load · Shift rename'});
     needsRedraw = false;
 }
@@ -843,13 +875,13 @@ globalThis.init = function() {
 };
 
 globalThis.onResume = function() {
+    shift = false; deleteHeld = false; muteHeld = false;
     ready = fetchAll(); paintAll(true); resumePaints = 3; needsRedraw = true;
 };
 
-/* `suspend_keeps_js` normally reserves Back for Schwung's host-level suspend.
- * Claim it only while Mono has an internal modal open; the host then forwards
- * the original button event to onMidiMessageInternal(), which closes the modal.
- * At the main instrument screen Back keeps its normal suspend behavior. */
+/* New hosts use suspend_self_managed and forward Back so Mono can close an
+ * internal view before parking. wantsBack keeps the same behavior on hosts
+ * that implement the earlier conditional-Back proposal. */
 globalThis.wantsBack = function() { return isTextEntryActive() || presetMode || seqSetup; };
 
 globalThis.tick = function() {
@@ -895,6 +927,7 @@ globalThis.onMidiMessageInternal = function(data) {
     const status = data[0] & 0xF0, d1 = data[1], d2 = data[2];
     if (status === 0xB0) {
         if (d1 === MoveShift) { shift = d2 > 0; needsRedraw = true; return; }
+        if (d1 === MoveMute) { muteHeld = d2 > 0; needsRedraw = true; return; }
         if (seqSetup) {
             if (d1 === MoveBack && d2 > 0) { closeSeqSetup(); return; }
             if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setSetupPage(setupPage + d); return; }
@@ -928,43 +961,32 @@ globalThis.onMidiMessageInternal = function(data) {
                 else loadSelectedPreset();
                 return;
             }
+            if (d1 === MoveLeft && d2 >= 64 && shiftActive()) {
+                deleteSelectedPreset();
+                return;
+            }
             if (d1 === MoveBack && d2 > 0) { closePresetBrowser(); return; }
             return;
         }
+        if (d1 === MoveBack && d2 > 0) { suspendMono(); return; }
         if ((d1 === MoveUp || d1 === MoveDown) && d2 > 0) {
             setKeyboardOctave(keyboardOctave + (d1 === MoveUp ? 1 : -1));
             return;
         }
         if (d1 === MoveCopy && d2 > 0) {
             if (heldStep) {
-                heldStep.used = true;
-                if (shiftActive()) {
-                    host_module_set_param('paste_step', `${track}:${heldStep.step}`);
-                    announce(`Pasted step ${heldStep.step + 1}`);
-                } else {
-                    host_module_set_param('copy_step', `${track}:${heldStep.step}`);
-                    announce(`Copied step ${heldStep.step + 1}`);
-                }
-            } else if (shiftActive()) {
-                host_module_set_param('paste_track', `${track}`);
-                fetchAll(); paintAll(false); announce(`Pasted track ${track + 1}`);
-            } else {
-                host_module_set_param('copy_track', `${track}`);
-                announce(`Copied track ${track + 1}`);
-            }
-            needsRedraw = true; return;
+                copyOrPasteStep(shiftActive());
+            } else copyOrPasteTrack(shiftActive());
+            return;
         }
         if (d1 === MoveUndo && d2 > 0) {
-            host_module_set_param('undo', '1');
-            fetchAll(); paintAll(false); needsRedraw = true; announce('Undo'); return;
+            undoLastEdit(); return;
         }
         if (d1 === MoveDelete) {
             if (d2 > 0) { deleteHeld = true; deleteUsed = false; }
             else {
                 if (heldStep && !deleteUsed) {
-                    host_module_set_param('clear_step', `${track}:${heldStep.step}`);
-                    heldStep.used = true; parseSteps(); paintSteps(false);
-                    announce(`Cleared step ${heldStep.step + 1}`);
+                    clearHeldStep();
                 }
                 deleteHeld = false; deleteUsed = false;
             }
@@ -974,10 +996,19 @@ globalThis.onMidiMessageInternal = function(data) {
             openPresetBrowser();
             return;
         }
-        if (d1 === MoveRec && d2 > 0) { toggleRecord(); return; }
+        if (d1 === MoveRec && d2 > 0) {
+            if (heldStep) clearHeldStep();
+            else if (shiftActive()) undoLastEdit();
+            else toggleRecord();
+            return;
+        }
         if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setPage(page + d); return; }
-        if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
-        if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
+        if (d1 === MoveLeft && d2 >= 64) {
+            shiftActive() ? copyOrPasteTrack(false) : setStepPage(stepPage - 1); return;
+        }
+        if (d1 === MoveRight && d2 >= 64) {
+            shiftActive() ? copyOrPasteTrack(true) : setStepPage(stepPage + 1); return;
+        }
         if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) {
             const d = decodeDelta(d2); if (d) adjust(d1 - MoveKnob1, d); return;
         }
@@ -1035,8 +1066,12 @@ globalThis.onMidiMessageInternal = function(data) {
             heldStep = {step: stepPage * 16 + d1 - STEP_FIRST, used: false};
             paintSteps(false); needsRedraw = true; return;
         }
+        if (heldStep && d1 === PAD_MACHINE) {
+            copyOrPasteStep(shiftActive());
+            return;
+        }
         for (let i = 0; i < 6; i++) if (d1 === TRACK_PADS[i]) {
-            if (deleteHeld) {
+            if (deleteHeld || muteHeld) {
                 deleteUsed = true;
                 host_module_set_param(shiftActive() ? 'track_solo_toggle' : 'track_mute_toggle', `${i}`);
                 fetchAll(); paintTracks(false); needsRedraw = true;
