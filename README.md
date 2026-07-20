@@ -3,7 +3,7 @@
 Mono is a clean-room, Monomachine-inspired digital instrument for Ableton
 Move, built as a [Schwung](https://github.com/charlesvestal/schwung) module.
 
-It ships in two forms:
+It ships as a two-module suite from one source tree and one GitHub release:
 
 - **Mono Voice** (`mono-voice`) — one machine voice inside a normal Move
   track, using Move's pads and sequencer.
@@ -13,8 +13,10 @@ It ships in two forms:
 
 ## Install from GitHub
 
-Each module has a dedicated repository so Schwung Manager's Custom GitHub
-installer can resolve one unambiguous archive:
+Schwung's Module Store resolves both modules from this repository's
+multi-module release manifest. Schwung Manager's Custom GitHub installer does
+not yet offer a module picker, so the canonical repository defaults to Mono
+standalone and Mono Voice keeps a dedicated compatibility repository:
 
 - **Mono standalone:** enter
   `https://github.com/timncox/schwung-mono`
@@ -22,8 +24,9 @@ installer can resolve one unambiguous archive:
   `https://github.com/timncox/schwung-mono-voice`
 
 In Schwung Manager, open **Modules → Custom Install → From GitHub URL** and
-paste the repository for the form you want. The two modules continue to share
-one canonical synthesis engine and source history in this repository.
+paste the repository for the form you want. Both archives are built and
+published together from this canonical repository; the Mono Voice repository
+only mirrors its archive for direct installs.
 
 ## Operation manual
 
