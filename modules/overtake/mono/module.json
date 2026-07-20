@@ -2,7 +2,7 @@
   "id": "mono",
   "name": "Mono",
   "abbrev": "MONO",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Six-track machine synth with locks, arp, neighbor routing and song mode",
   "dsp": "dsp.so",
   "ui": "ui.js",
@@ -10,6 +10,7 @@
   "component_type": "overtake",
   "capabilities": {
     "suspend_keeps_js": true,
+    "suspend_self_managed": true,
     "button_passthrough": [85]
   },
   "author": "timncox"

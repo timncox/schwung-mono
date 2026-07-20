@@ -150,7 +150,13 @@ and wave remain stepped so automation never passes through an unintended mode.
   settings, and every parameter lock; choosing a saved name recalls it without
   starting transport automatically. Confirming a save returns to Mono. Back
   cancels the naming screen or closes the preset browser without leaving Mono;
-  at the main instrument screen it resumes its normal Schwung suspend behavior.
+  at the main instrument screen it parks Mono and returns to Move. Shift + Left
+  provides a safe two-press delete gesture inside the preset browser.
+
+Mono 0.3.3 is compatible with Schwung 0.11.6's native ownership of Copy,
+Delete, and Undo. The dedicated buttons still work on hosts that forward them;
+the controls below include hardware-safe alternatives that work on stock
+0.11.6.
 
 ## Build and test
 
@@ -178,8 +184,9 @@ scripts/deploy.sh
 - Top-row pad 8: start/stop internal sequencer
 - Shift + top-row pad 8: open Setup; turn the jog for Sequence, Step Detail,
   Arpeggiator, Routing + FX, and Song Mode
-- Delete + top-row pads 1-6: mute/unmute a track
-- Shift + Delete + top-row pads 1-6: solo/unsolo a track
+- Mute + top-row pads 1-6: mute/unmute a track (Delete + pad also works when
+  the host forwards Delete)
+- Shift + Mute + top-row pads 1-6: solo/unsolo a track
 - Lower three pad rows: chromatic performance keyboard
 - Up / Down: shift the selected track's performance keyboard by ±4 octaves
 - Back: return from Mono to native Move
@@ -189,10 +196,12 @@ scripts/deploy.sh
 - Shift + knobs 1-8: edit the current page's secondary bank
 - Hold step + turn knob: write a parameter lock
 - Hold step + Shift + turn knob: remove that parameter lock
-- Hold step + Copy: copy a step; hold step + Shift + Copy: paste it
-- Copy / Shift + Copy without a held step: copy / paste the selected track
-- Undo: undo or redo the most recent sound, pattern, or timing edit
-- Move Record: arm/disarm live knob-lock recording during playback
+- Hold step + top-row pad 7: copy a step; add Shift to paste it
+- Hold step + Record: clear that step
+- Shift + Left / Right: copy / paste the selected track
+- Shift + Record: undo or redo the most recent sound, pattern, or timing edit
+- Copy, Delete, and Undo retain the same operations on hosts that forward them
+- Move Record by itself: arm/disarm live knob-lock recording during playback
 
 Setup keeps performance controls off the sound-editing screen. Its Sequence
 page uses knobs 1–4 to

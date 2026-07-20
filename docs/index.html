@@ -1031,7 +1031,7 @@
       <div class="reference-grid">
         <div class="ref-panel">
           <h3>Mono / full surface</h3>
-          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks. Delete + pad toggles mute; Shift + Delete + pad toggles solo.</span></div>
+          <div class="ref-row"><b>Top pads 1–6</b><span>Select one of six synth tracks. Mute + pad toggles mute; Shift + Mute + pad toggles solo. Delete + pad remains available on hosts that forward Delete.</span></div>
           <div class="ref-row"><b>Top pad 7</b><span>Next machine. <kbd>Shift</kbd> + pad selects the previous machine.</span></div>
           <div class="ref-row"><b>Top pad 8</b><span>Start or stop Mono's internal sequencer. <kbd>Shift</kbd> + pad 8 opens Setup; turn the jog for Sequence, Step Detail, Arpeggiator, Routing + FX, and Song Mode.</span></div>
           <div class="ref-row"><b>Lower 24 pads</b><span>Chromatic keyboard for the selected track, starting at MIDI note 48 at octave O+0.</span></div>
@@ -1040,12 +1040,13 @@
           <div class="ref-row"><b>Step keys</b><span>Tap to toggle trigs; hold while turning a knob to lock it.</span></div>
           <div class="ref-row"><b>Arrows</b><span>Select steps 1–16, 17–32, 33–48, or 49–64.</span></div>
           <div class="ref-row"><b>Setup</b><span>Sequence edits window/timing; Step Detail edits microtiming, tie, accent, probability and retrig; Arp edits latch and its 16 offsets; Routing patches the previous track and track FX; Song edits 16 chain rows.</span></div>
-          <div class="ref-row"><b>Copy and Undo</b><span>Hold a step + Copy to copy; add Shift to paste. With no held step, Copy / Shift + Copy works on the whole selected track. Undo toggles undo and redo.</span></div>
+          <div class="ref-row"><b>Step editing</b><span>On stock Schwung 0.11.6, hold a step + top pad 7 to copy, add Shift to paste, or press Record to clear. The dedicated Copy/Delete buttons remain available on hosts that forward them.</span></div>
+          <div class="ref-row"><b>Track editing</b><span>Shift + Left copies the selected track; Shift + Right pastes it. Shift + Record toggles undo and redo. This fallback layout keeps every edit reachable while Move owns its native Copy/Delete/Undo buttons.</span></div>
           <div class="ref-row"><b>Remote UI</b><span>In addition to full Step Detail, Remote exposes Patch Lab and morphing, user-wave import, the arp lane, routing/track FX, song rows, and low-level calibration signals.</span></div>
           <div class="ref-row"><b>Jog wheel</b><span>Move through the seven parameter pages.</span></div>
           <div class="ref-row"><b>Knobs 1–8</b><span>Edit the current page. Touching either group of four focuses that clearer display bank.</span></div>
           <div class="ref-row"><b>Shift + knobs</b><span>Edit the current page's secondary eight-control bank.</span></div>
-          <div class="ref-row"><b>Record</b><span>Arm live parameter-lock capture. Start the internal sequencer and turn knobs; continuous values glide between recorded steps.</span></div>
+          <div class="ref-row"><b>Record</b><span>By itself, arm live parameter-lock capture. Start the internal sequencer and turn knobs; continuous values glide between recorded steps. With a held step it clears; with Shift it performs Undo.</span></div>
           <div class="ref-row"><b>Back</b><span>Return from full-surface Mono to native Move. Back closes Setup or the preset browser first when either is open.</span></div>
         </div>
         <div class="ref-panel">
