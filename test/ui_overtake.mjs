@@ -160,6 +160,7 @@ const ui = context;
 ui.init();
 
 const cc = (control, value) => ui.onMidiMessageInternal([0xb0, control, value]);
+const noteOn = (note, velocity = 100) => ui.onMidiMessageInternal([0x90, note, velocity]);
 
 noteLedMessages.length = 0;
 buttonLedMessages.length = 0;
@@ -168,6 +169,21 @@ assert.deepEqual(buttonLedMessages.at(-1), {cc: MoveRec, color: constants.Bright
     'record arm must light the Record button through its CC LED');
 assert.equal(noteLedMessages.some(message => message.note === MoveRec), false,
     'record arm must never light pad note 86');
+
+cc(MoveShift, 127);
+noteOn(99);
+cc(MoveShift, 0);
+cc(MoveMainKnob, 3);
+cc(MoveKnob1, 4);
+assert.equal(params.get('route_mode') ?? '0', '0',
+    'Track 1 must reject neighbor routing because it has no source');
+assert(announcements.at(-1).includes('Track 1 has no previous routing source'));
+noteOn(93);
+cc(MoveKnob1, 4);
+assert.equal(params.get('route_mode'), '4',
+    'Track 2 must accept FM from Track 1 on the receiving track');
+assert(announcements.at(-1).includes('Input from Track 1'));
+cc(MoveBack, 127);
 
 const openSaveKeyboard = () => {
     cc(MoveShift, 127);
@@ -211,4 +227,4 @@ assert.equal(textCloseCalls, 1);
 assert.deepEqual(buttonLedMessages.at(-1), {cc: MoveRec, color: constants.Black, force: true},
     'unload must clear the Record button');
 
-console.log('mono overtake UI: preset save and navigation tests passed');
+console.log('mono overtake UI: presets, routing, and LED tests passed');

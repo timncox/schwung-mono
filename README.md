@@ -106,9 +106,13 @@ panels and their parameter locks to the corrected control layout.
 - **DigiPRO user waves:** eight persistent 512-sample slots shared by Mono and
   Mono Voice. Remote UI imports an audio file; the engine DC-centers,
   normalizes, and 12-bit quantizes it before an atomic bank save.
-- **Neighbor and track FX:** each track can mix, replace, ring-modulate, or FM
-  its oscillator from the preceding track, then use dedicated chorus, flanger,
-  ring modulation, reverb, compression, or crushing.
+- **Neighbor and track FX:** routing is set on the receiving track: Track 2
+  receives Track 1, Track 3 receives Track 2, and so on. The receiving track
+  can mix, replace, ring-modulate, or FM its oscillator from that preceding
+  voice, then use dedicated chorus, flanger, ring modulation, reverb,
+  compression, or crushing. The source must be triggered, but it can be muted
+  from the final mix while continuing to modulate the receiver. Track 1 has no
+  preceding source.
 - **Deeper sequencing:** every step adds ±23/48-step microtiming, tie, and
   accent. Sixteen song rows chain arbitrary windows with repeats and ±24
   semitone transposition.

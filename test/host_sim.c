@@ -1405,7 +1405,9 @@ static void test_user_wave_upload_and_persistence(void) {
 static void test_neighbor_routing_and_track_fx(void) {
     mono_t *plain = mono_create(&host, 2);
     mono_t *routed = mono_create(&host, 2);
-    assert(plain && routed);
+    mono_t *fm_plain = mono_create(&host, 2);
+    mono_t *fm_routed = mono_create(&host, 2);
+    assert(plain && routed && fm_plain && fm_routed);
     mono_note_on(plain, 0, 48, 110);
     mono_note_on(plain, 1, 55, 110);
     mono_note_on(routed, 0, 48, 110);
@@ -1418,8 +1420,24 @@ static void test_neighbor_routing_and_track_fx(void) {
     mono_set_param(routed, "track_fx_tone", "20");
     mono_set_param(routed, "track_fx_mix", "127");
     assert(render_hash_long(plain) != render_hash_long(routed));
+
+    /* FM is configured on the receiving track. A muted preceding track still
+     * runs as a modulation source, which lets the performer hear the carrier
+     * alone without breaking the routing graph. */
+    mono_note_on(fm_plain, 0, 48, 110);
+    mono_note_on(fm_plain, 1, 55, 110);
+    mono_note_on(fm_routed, 0, 48, 110);
+    mono_note_on(fm_routed, 1, 55, 110);
+    mono_set_param(fm_plain, "track_mute", "1");
+    mono_set_param(fm_routed, "track_mute", "1");
+    mono_set_param(fm_routed, "track", "1");
+    mono_set_param(fm_routed, "route_mode", "4");
+    mono_set_param(fm_routed, "route_amount", "127");
+    assert(render_hash_long(fm_plain) != render_hash_long(fm_routed));
     mono_destroy(plain);
     mono_destroy(routed);
+    mono_destroy(fm_plain);
+    mono_destroy(fm_routed);
 }
 
 static void test_microtiming_accent_ties_and_song_mode(void) {
