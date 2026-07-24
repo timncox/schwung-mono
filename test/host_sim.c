@@ -1470,6 +1470,60 @@ static void test_microtiming_accent_ties_and_song_mode(void) {
     mono_destroy(song);
 }
 
+static void test_tie_only_steps_extend_held_notes(void) {
+    /* One step at 120 BPM is ~43 blocks. Max gate holds for exactly one
+     * step; without a tie the release fires at the boundary. */
+    mono_t *plain = mono_create(&host, 1);
+    assert(plain);
+    mono_set_param(plain, "amp1", "0");   /* instant attack */
+    mono_set_param(plain, "amp2", "127"); /* 4 s hold */
+    mono_set_param(plain, "amp3", "127"); /* 12 s decay */
+    mono_set_param(plain, "amp4", "32");  /* ~16 ms release */
+    mono_set_param(plain, "set_step", "0:48:100:127:15");
+    mono_set_param(plain, "transport", "1");
+    assert(render_energy(plain, 44) > 1000);
+    (void)render_energy(plain, 14); /* boundary plus release tail */
+    assert(render_energy(plain, 20) == 0);
+    assert(debug_note(plain) == -1);
+    mono_destroy(plain);
+
+    /* A note-less step carrying only a tie keeps the previous note alive
+     * through its own step instead of being skipped as empty. */
+    mono_t *tied = mono_create(&host, 1);
+    assert(tied);
+    mono_set_param(tied, "amp1", "0");
+    mono_set_param(tied, "amp2", "127");
+    mono_set_param(tied, "amp3", "127");
+    mono_set_param(tied, "amp4", "32");
+    mono_set_param(tied, "set_step", "0:48:100:127:15");
+    mono_set_param(tied, "edit_step", "1");
+    mono_set_param(tied, "step_tie", "1");
+    char steps[192];
+    get_string(tied, "steps", steps, sizeof(steps));
+    assert(!strncmp(steps, "1,1,0", 5)); /* tie-only step shows as active */
+    mono_set_param(tied, "transport", "1");
+    assert(render_energy(tied, 44) > 1000);
+    assert(render_energy(tied, 14) > 1000); /* still sounding in step 1 */
+
+    /* Tie-only steps survive a state round trip. */
+    char state[16384];
+    assert(mono_get_param(tied, "state", state, sizeof(state)) > 0);
+    mono_t *restored = mono_create(&host, 1);
+    assert(restored);
+    mono_set_param(restored, "state", state);
+    mono_set_param(restored, "edit_step", "1");
+    assert(get_int(restored, "step_tie") == 1);
+    assert(get_int(restored, "step_note") == -1);
+    get_string(restored, "steps", steps, sizeof(steps));
+    assert(!strncmp(steps, "1,1,0", 5));
+    mono_set_param(restored, "toggle_step", "1"); /* pad press clears it */
+    assert(get_int(restored, "step_tie") == 0);
+    get_string(restored, "steps", steps, sizeof(steps));
+    assert(!strncmp(steps, "1,0,0", 5));
+    mono_destroy(restored);
+    mono_destroy(tied);
+}
+
 static void test_calibration_generators_and_metrics(void) {
     mono_t *m = mono_create(&host, 1);
     assert(m);
@@ -1527,6 +1581,7 @@ int main(void) {
     test_user_wave_upload_and_persistence();
     test_neighbor_routing_and_track_fx();
     test_microtiming_accent_ties_and_song_mode();
+    test_tie_only_steps_extend_held_notes();
     test_calibration_generators_and_metrics();
     puts("mono host simulator: all tests passed");
     return 0;

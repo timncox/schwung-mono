@@ -426,6 +426,16 @@ static int step_has_all_locks(const mono_step_t *s) {
     return 1;
 }
 
+/* A note-less step still counts when it carries a tie: it extends the
+ * previous note instead of triggering one. */
+static int step_is_active(const mono_step_t *s) {
+    return s->note >= 0 || s->trig_mask || s->tie || step_has_any_lock(s);
+}
+
+static int step_display_state(const mono_step_t *s) {
+    return step_has_any_lock(s) ? 2 : (step_is_active(s) ? 1 : 0);
+}
+
 static void step_set_lock(mono_step_t *s, int pid) {
     s->lock_mask[pid / 64] |= UINT64_C(1) << (pid % 64);
 }
@@ -2283,7 +2293,7 @@ static void fire_sequence_step(mono_t *m, mono_track_t *t, int step_index,
     if (step_index < 0 || step_index >= MONO_STEPS) return;
     mono_step_t *s = &t->steps[step_index];
     t->play_step = step_index;
-    if (s->note < 0 && s->trig_mask == 0 && !step_has_any_lock(s)) return;
+    if (!step_is_active(s)) return;
     if (!condition_allows(s->condition, cycle) ||
         (s->probability < 127 && (xrnd(&t->seq_rng) & 127u) >= s->probability))
         return;
@@ -2294,6 +2304,9 @@ static void fire_sequence_step(mono_t *m, mono_track_t *t, int step_index,
     int velocity = iclamp(s->velocity + (s->accent * 32) / 127, 1, 127);
     if (s->tie && t->amp.stage != ENV_OFF) {
         if (note >= 0) track_pitch(t, note, velocity);
+        /* The previous gate may already have closed at the step boundary;
+         * a tie resumes the decay stage instead of fading through release. */
+        if (t->amp.stage == ENV_RELEASE) t->amp.stage = ENV_DECAY;
         float frames_per_step = m->sample_rate * 60.0f / (bpm_now(m) * 4.0f);
         t->gate_left = (int)(frames_per_step * iclamp(t->seq_division, 1, 8) *
                              fclamp(s->gate / 127.0f, 0.5f, 1.2f));
@@ -3586,7 +3599,7 @@ void mono_set_param(mono_t *m, const char *key, const char *val) {
         int step = iclamp(v, 0, MONO_STEPS - 1);
         capture_undo(m);
         mono_step_t *s = &t->steps[step];
-        if (s->note >= 0 || s->trig_mask) clear_step(s);
+        if (step_is_active(s)) clear_step(s);
         else { s->note = (int8_t)t->last_note; s->velocity = 100; s->gate = 100; s->trig_mask = 15; }
         changed(m);
         return;
@@ -3806,7 +3819,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int first = m->step_page * 16;
         for (int i = 0; i < 16; ++i) {
             mono_step_t *s = &t->steps[first + i];
-            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_display_state(s);
             int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= buf_len - n) break;
             n += wrote;
@@ -3817,7 +3830,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int n = 0;
         for (int i = 0; i < MONO_STEPS; ++i) {
             mono_step_t *s = &t->steps[i];
-            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_display_state(s);
             int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= buf_len - n) break;
             n += wrote;
@@ -3854,7 +3867,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int first = m->step_page * 16;
         for (int i = 0; i < 16 && sn < (int)sizeof(step_csv); ++i) {
             mono_step_t *s = &t->steps[first + i];
-            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_display_state(s);
             int wrote = snprintf(step_csv + sn, sizeof(step_csv) - (size_t)sn,
                                  "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= (int)sizeof(step_csv) - sn) break;
@@ -3863,7 +3876,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         int an = 0;
         for (int i = 0; i < MONO_STEPS && an < (int)sizeof(all_step_csv); ++i) {
             mono_step_t *s = &t->steps[i];
-            int state = step_has_any_lock(s) ? 2 : ((s->note >= 0 || s->trig_mask) ? 1 : 0);
+            int state = step_display_state(s);
             int wrote = snprintf(all_step_csv + an, sizeof(all_step_csv) - (size_t)an,
                                  "%s%d", i ? "," : "", state);
             if (wrote < 0 || wrote >= (int)sizeof(all_step_csv) - an) break;
@@ -4014,7 +4027,7 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
             }
             for (int si = 0; si < MONO_STEPS; ++si) {
                 const mono_step_t *step = &saved->steps[si];
-                if (step->note < 0 && !step->trig_mask && !step_has_any_lock(step)) continue;
+                if (!step_is_active(step)) continue;
                 if (!appendf(buf, buf_len, &n,
                              "S%X%02X%02X%02X%02X%02X",
                              tr, si, (unsigned)(uint8_t)step->note,

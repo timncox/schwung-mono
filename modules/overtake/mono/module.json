@@ -2,7 +2,7 @@
   "id": "mono",
   "name": "Mono",
   "abbrev": "MONO",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Six-track machine synth with locks, arp, neighbor routing and song mode",
   "dsp": "dsp.so",
   "ui": "ui.js",
