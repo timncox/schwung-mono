@@ -107,7 +107,11 @@ reflects DSP-side CC edits on its normal refresh.
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
 independent note/amp/filter/LFO trigger bits, probability, 1–8 retrigs, cycle
 condition, slide, ±23/48-step microtiming, tie, accent, and locks for any of the
-112 sound parameters. On each trig,
+112 sound parameters. Gate tops out at exactly one step; longer notes chain
+ties. A tied step keeps the previous note's gate open through itself without
+retriggering envelopes (a just-released amp envelope resumes its decay stage),
+needs no note of its own — tie alone makes a step active for firing, display,
+and serialization — and changes pitch legato when it does carry one. On each trig,
 effective parameters reset to the track's base values and then apply that
 step's locks. MIDI clock advances at six ticks per 16th; swing offsets
 alternating steps, and the engine falls back to `host->get_bpm()` when its own
