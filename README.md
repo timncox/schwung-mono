@@ -136,6 +136,31 @@ Continuous controls glide to each captured value over about 30 ms to avoid
 zipper noise. Enumerated choices such as waveform, LFO destination, trigger,
 and wave remain stepped so automation never passes through an unintended mode.
 
+## MIDI CC control
+
+Every sound parameter of every track responds to CC from a controller on
+the Move's USB-A port. The CC's **MIDI channel picks the track** (channel
+1–6 → track 1–6, exactly like note input; Mono Voice ignores the channel)
+and the **CC number picks the parameter**:
+
+| page | base CCs | Shift CCs |
+|------|----------|-----------|
+| SYNTH | 8–15 | 64–71 |
+| AMP | 16–23 | 72–79 |
+| FLT | 24–31 | 80–87 |
+| FX | 32–39 | 88–95 |
+| LFO1 | 40–47 | 96–103 |
+| LFO2 | 48–55 | 104–111 |
+| LFO3 | 56–63 | 112–119 |
+
+Within a page the eight CCs follow the eight knobs left to right. Values
+0–127 write directly (selector params scale across their choices), and CC
+moves record into param locks under Live knob recording just like the
+hardware knobs. CC 0–7 and 120+ are ignored, so mod-wheel and bank-select
+traffic can't corrupt a patch. In a chain slot (Mono Voice) set the
+controller to the slot's receive channel — Move's auto channel mapping
+remaps notes, not CCs.
+
 ## Saving and recall
 
 - **Mono Voice sound preset:** in Schwung's Chain Editor, highlight the synth

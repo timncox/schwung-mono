@@ -13,6 +13,7 @@
 #define MOVE_MIDI_SOURCE_INTERNAL 0
 #define MOVE_MIDI_SOURCE_EXTERNAL 2
 #define MOVE_MIDI_SOURCE_HOST 3
+#define MOVE_MIDI_SOURCE_FX_BROADCAST 4  /* chain host broadcast to audio FX */
 
 typedef int (*move_mod_emit_value_fn)(void *, const char *, const char *,
                                       const char *, float, float, float,

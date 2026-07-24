@@ -283,6 +283,11 @@ struct mono {
     float master;
     float smooth_coeff;
     int control_phase;
+
+    /* MIDI CC control */
+    uint8_t  cc_last[3];   /* last external CC accepted (duplicate guard) */
+    uint64_t cc_last_frames;
+    uint64_t cc_frames;    /* monotonic rendered-frame counter (guard clock) */
     uint32_t revision;
     uint32_t note_events;
     uint32_t render_blocks;
@@ -2506,6 +2511,7 @@ static void internal_clock_tick(mono_t *m, float bpm) {
 
 void mono_render(mono_t *m, int16_t *out_lr, int frames) {
     if (!m || !out_lr || frames <= 0) return;
+    m->cc_frames += (uint64_t)frames;
     int peak = 0;
     float bpm = bpm_now(m);
     int any_solo = 0;
@@ -2586,6 +2592,38 @@ void mono_render(mono_t *m, int16_t *out_lr, int frames) {
     if (peak > m->lifetime_peak) m->lifetime_peak = peak;
 }
 
+/* --- MIDI CC control ----------------------------------------------- */
+/* An external controller reaches every sound parameter of every track:
+ * the CC's MIDI channel picks the track exactly like note input
+ * (channel % track_count), the CC number picks the parameter:
+ *   CC 8..63    base params 0..55   (SYNTH AMP FLT FX LFO1 LFO2 LFO3, x8)
+ *   CC 64..119  Shift bank params   (same page order)
+ * CC 0-7 and 120+ are ignored (mod wheel, bank select, channel mode).
+ * Values write through the same path as the UI: base+effective update,
+ * machine memory, and live param-lock recording when the sequencer runs.
+ * Selector params (LFO destinations) scale 0-127 across their range. */
+static void mono_cc_param(mono_t *m, int track, int cc, int v) {
+    int pid;
+    if (cc >= 8 && cc < 8 + MONO_PRIMARY_PARAMS) pid = cc - 8;
+    else if (cc >= 64 && cc < 64 + MONO_SHIFT_PARAMS)
+        pid = MONO_SHIFT_BASE + (cc - 64);
+    else return;
+    mono_track_t *t = &m->track[track];
+    int max = is_lfo_destination_param(pid) ? MONO_LFO_DESTINATIONS - 1 : 127;
+    int val = max == 127 ? v : (v * max + 63) / 127;
+    t->base[pid] = (uint8_t)iclamp(val, 0, max);
+    t->effective[pid] = t->base[pid];
+    if (pid < 8 || (pid >= MONO_ALT_BASE && pid < MONO_ALT_BASE + 8))
+        remember_machine(t);
+    int record_step = t->play_step >= 0 ? t->play_step : m->seq_step;
+    if (m->record_locks && m->transport && record_step >= 0) {
+        mono_step_t *step = &t->steps[record_step];
+        step_set_lock(step, pid);
+        step->lock_values[pid] = t->base[pid];
+    }
+    changed(m);
+}
+
 void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
     if (!m || !msg || len < 1) return;
     uint8_t st = msg[0];
@@ -2623,6 +2661,24 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
     int channel = st & 0x0F;
     int track = m->track_count == 1 ? 0 : channel % m->track_count;
     int note = msg[1];
+    if (kind == 0xB0) {
+        /* External CC control only — internal CCs are Move's own encoders.
+         * A channel-matched chain slot can deliver one external CC twice
+         * (channel dispatch + FX broadcast): identical messages within
+         * ~2 blocks drop. */
+        if ((source == MOVE_MIDI_SOURCE_EXTERNAL ||
+             source == MOVE_MIDI_SOURCE_FX_BROADCAST) &&
+            !(st == m->cc_last[0] && msg[1] == m->cc_last[1] &&
+              msg[2] == m->cc_last[2] &&
+              m->cc_frames - m->cc_last_frames <= 256)) {
+            m->cc_last[0] = st;
+            m->cc_last[1] = msg[1];
+            m->cc_last[2] = msg[2];
+            m->cc_last_frames = m->cc_frames;
+            mono_cc_param(m, track, msg[1], msg[2]);
+        }
+        return;
+    }
     if (m->track_count > 1 && source == MOVE_MIDI_SOURCE_INTERNAL) {
         /* Overtake receives raw Move pad note IDs. Let the DSP own the lower
          * three rows directly so sound never depends on an asynchronous JS
