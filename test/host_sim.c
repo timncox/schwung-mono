@@ -1470,6 +1470,52 @@ static void test_microtiming_accent_ties_and_song_mode(void) {
     mono_destroy(song);
 }
 
+static void test_cc_control(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    int16_t out[256 * 2];
+
+    /* CC 8 = base param 0 (SYNTH p1); channel picks the track like notes */
+    uint8_t cc[3] = { 0xB1, 8, 99 };               /* channel 1 -> track 1 */
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    mono_set_param(m, "track", "1");
+    assert(get_int(m, "syn1") == 99);
+    mono_set_param(m, "track", "0");
+    assert(get_int(m, "syn1") != 99);              /* other track untouched */
+
+    /* Shift bank: CC 64 = Shift param 0 (SYNTH Shift p1 = syn9) */
+    cc[0] = 0xB0; cc[1] = 64; cc[2] = 77;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    assert(get_int(m, "syn9") == 77);
+
+    /* internal CCs are Move's encoders, never param writes */
+    cc[1] = 8; cc[2] = 12;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(get_int(m, "syn1") != 12);
+
+    /* duplicate guard: identical message inside the window drops, passes
+     * again after audio renders */
+    cc[2] = 50;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    assert(get_int(m, "syn1") == 50);
+    mono_set_param(m, "syn1", "10");
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_FX_BROADCAST);
+    assert(get_int(m, "syn1") == 10);
+    for (int i = 0; i < 4; ++i) mono_render(m, out, 256);
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    assert(get_int(m, "syn1") == 50);
+
+    /* out-of-map CCs (mod wheel, channel mode) are ignored */
+    cc[1] = 1; cc[2] = 127;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    cc[1] = 120; cc[2] = 0;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    assert(get_int(m, "syn1") == 50);
+
+    mono_destroy(m);
+    puts("ok: midi cc control");
+}
+
 static void test_tie_only_steps_extend_held_notes(void) {
     /* One step at 120 BPM is ~43 blocks. Max gate holds for exactly one
      * step; without a tie the release fires at the boundary. */
@@ -1583,6 +1629,7 @@ int main(void) {
     test_microtiming_accent_ties_and_song_mode();
     test_tie_only_steps_extend_held_notes();
     test_calibration_generators_and_metrics();
+    test_cc_control();
     puts("mono host simulator: all tests passed");
     return 0;
 }

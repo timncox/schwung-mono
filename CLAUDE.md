@@ -92,6 +92,16 @@ Dynamic `alt1`...`alt8` aliases expose the selected page's Shift bank. The
 overtake UI exposes the selected primary page through dynamic `p1`...`p8`
 aliases.
 
+External MIDI CC control (`mono_cc_param`): CC 8-63 → base param ids 0-55,
+CC 64-119 → Shift ids, CC channel → track (`channel % track_count`, the
+note convention). Accept ONLY source EXTERNAL/FX_BROADCAST (internal CCs
+are Move's encoders); identical messages within 256 samples drop
+(`cc_last`/`cc_frames` — chain slots can deliver one external CC twice,
+verified in schwung shadow_midi.c 2026-07-24). Writes flow through the
+same base/effective/remember_machine/param-lock path as UI knob edits, so
+CC moves record locks when the sequencer records. The UI polls params and
+reflects DSP-side CC edits on its normal refresh.
+
 ## Sequencer
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,
