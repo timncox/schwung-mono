@@ -179,17 +179,35 @@ function safePresetStem(name) {
     return (clean || 'Mono Pattern').slice(0, 64);
 }
 
+/* QuickJS `os.readdir` answers with a [names, errno] tuple, and the raw listing
+ * includes "." and "..". Reading the tuple as a flat filename array silently
+ * dropped every preset: `/\.json$/.test(namesArray)` tests the *stringified*
+ * array, so the whole listing was kept or discarded as one blob depending on
+ * which entry the filesystem happened to return last. When it ended in ".json"
+ * the follow-up `.replace` ran against an Array and threw, which killed the
+ * save before it could announce, and later killed the browser on open.
+ * Unwrap the tuple the same way Schwung's own preset browser does. */
+function readPresetDir() {
+    let result;
+    try { result = os.readdir(PRESET_DIR); } catch (e) { return []; }
+    if (!Array.isArray(result) || !Array.isArray(result[0])) return [];
+    return result[0].filter(entry =>
+        typeof entry === 'string' && entry !== '.' && entry !== '..');
+}
+
 function loadPresetList() {
-    let files = [];
-    try { files = os.readdir(PRESET_DIR) || []; } catch (e) { files = []; }
-    presets = files.filter(file => /\.json$/i.test(file)).map(file => {
+    const found = [];
+    for (const file of readPresetDir()) {
+        if (!/\.json$/i.test(file)) continue;
         let name = file.replace(/\.json$/i, '');
         try {
             const parsed = JSON.parse(host_read_file(`${PRESET_DIR}/${file}`) || '{}');
             if (parsed.name) name = String(parsed.name);
         } catch (e) {}
-        return {name, file};
-    }).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        found.push({name, file});
+    }
+    found.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    presets = found;
 }
 
 function uniquePresetName(rawName, excludeFile = null) {
@@ -213,27 +231,47 @@ function uniquePresetStem(rawName, excludeFile = null) {
     return candidate;
 }
 
+/* `os.rename` reports failure with a negative return code rather than throwing,
+ * so the previous try/catch called every failed rename a success and left the
+ * payload stranded in the .tmp file. Check the code, and fall back to writing
+ * the destination directly so a rename refusal still saves the preset. */
 function writePresetAtomically(file, payload) {
     if (typeof host_write_file !== 'function') return false;
     const path = `${PRESET_DIR}/${file}`;
     const temp = `${path}.tmp`;
     if (!host_write_file(temp, payload)) return false;
+    let renamed = -1;
+    try { renamed = os.rename(temp, path); } catch (e) { renamed = -1; }
+    if (renamed === 0) return true;
+    const direct = host_write_file(path, payload);
+    try { os.remove(temp); } catch (e) {}
+    return !!direct;
+}
+
+/* Preset work touches the filesystem, and text_entry.mjs closes the keyboard
+ * only *after* onConfirm returns — so a throw anywhere in here strands the UI
+ * in text entry with the pads still blocked, and a throw out of a MIDI handler
+ * leaves the module wedged. Keep every preset entry point total: report the
+ * failure on screen and carry on. */
+function guardPreset(action, failureMessage) {
     try {
-        os.rename(temp, path);
-        return true;
+        return action();
     } catch (e) {
-        try { os.remove(temp); } catch (ignored) {}
-        return false;
+        announce(failureMessage);
+        needsRedraw = true;
+        return null;
     }
 }
 
 function openPresetBrowser() {
-    loadPresetList();
-    presetIndex = 0;
-    deletePresetFile = null;
-    presetMode = true;
-    needsRedraw = true;
-    announce(`Mono presets, ${presets.length} saved`);
+    guardPreset(() => {
+        loadPresetList();
+        presetIndex = 0;
+        deletePresetFile = null;
+        presetMode = true;
+        needsRedraw = true;
+        announce(`Mono presets, ${presets.length} saved`);
+    }, 'Preset list failed');
 }
 
 function closePresetBrowser() {
@@ -254,23 +292,25 @@ function getStateWithRetry() {
 }
 
 function saveCurrentPreset(rawName) {
-    const stateJson = getStateWithRetry();
-    if (!stateJson) { announce('Preset save failed'); return; }
-    if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
-    else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
-    const name = uniquePresetName(rawName);
-    const stem = uniquePresetStem(name);
-    let state;
-    try { state = JSON.parse(stateJson); } catch (e) { state = stateJson; }
-    const payload = JSON.stringify({name, module: 'mono', version: 1, state});
-    const ok = writePresetAtomically(`${stem}.json`, payload);
-    if (!ok) { announce('Preset save failed'); return; }
-    loadPresetList();
-    const found = presets.findIndex(p => p.name === name);
-    presetIndex = found >= 0 ? found + 1 : 0;
-    presetMode = false;
-    needsRedraw = true;
-    announce(`Saved ${name}`);
+    guardPreset(() => {
+        const stateJson = getStateWithRetry();
+        if (!stateJson) { announce('Preset save failed'); return; }
+        if (typeof host_ensure_dir === 'function') host_ensure_dir(PRESET_DIR);
+        else { try { os.mkdir(PRESET_DIR); } catch (e) {} }
+        const name = uniquePresetName(rawName);
+        const stem = uniquePresetStem(name);
+        let state;
+        try { state = JSON.parse(stateJson); } catch (e) { state = stateJson; }
+        const payload = JSON.stringify({name, module: 'mono', version: 1, state});
+        const ok = writePresetAtomically(`${stem}.json`, payload);
+        if (!ok) { announce('Preset save failed'); return; }
+        loadPresetList();
+        const found = presets.findIndex(p => p.name === name);
+        presetIndex = found >= 0 ? found + 1 : 0;
+        presetMode = false;
+        needsRedraw = true;
+        announce(`Saved ${name}`);
+    }, 'Preset save failed');
 }
 
 function startPresetRename() {
@@ -280,7 +320,7 @@ function startPresetRename() {
         title: '',
         initialText: entry.name,
         onAnnounce: announce,
-        onConfirm: rawName => {
+        onConfirm: rawName => guardPreset(() => {
             let payload;
             try { payload = JSON.parse(host_read_file(`${PRESET_DIR}/${entry.file}`) || '{}'); }
             catch (e) { announce('Preset rename failed'); return; }
@@ -298,28 +338,30 @@ function startPresetRename() {
             deletePresetFile = null;
             needsRedraw = true;
             announce(`Renamed ${name}`);
-        },
+        }, 'Preset rename failed'),
         onCancel: () => { needsRedraw = true; announce('Rename cancelled'); }
     });
 }
 
 function deleteSelectedPreset() {
-    const entry = presets[presetIndex - 1];
-    if (!entry) return;
-    if (deletePresetFile !== entry.file) {
-        deletePresetFile = entry.file;
+    guardPreset(() => {
+        const entry = presets[presetIndex - 1];
+        if (!entry) return;
+        if (deletePresetFile !== entry.file) {
+            deletePresetFile = entry.file;
+            needsRedraw = true;
+            announce(`Press Delete again to remove ${entry.name}`);
+            return;
+        }
+        try {
+            if (os.remove(`${PRESET_DIR}/${entry.file}`) < 0) throw new Error('remove failed');
+        } catch (e) { announce('Preset delete failed'); return; }
+        deletePresetFile = null;
+        loadPresetList();
+        presetIndex = Math.min(presetIndex, presets.length);
         needsRedraw = true;
-        announce(`Press Delete again to remove ${entry.name}`);
-        return;
-    }
-    try {
-        if (os.remove(`${PRESET_DIR}/${entry.file}`) < 0) throw new Error('remove failed');
-    } catch (e) { announce('Preset delete failed'); return; }
-    deletePresetFile = null;
-    loadPresetList();
-    presetIndex = Math.min(presetIndex, presets.length);
-    needsRedraw = true;
-    announce(`Deleted ${entry.name}`);
+        announce(`Deleted ${entry.name}`);
+    }, 'Preset delete failed');
 }
 
 function startPresetSave() {
@@ -333,27 +375,29 @@ function startPresetSave() {
 }
 
 function loadSelectedPreset() {
-    const entry = presets[presetIndex - 1];
-    if (!entry || typeof host_read_file !== 'function') return;
-    let stateJson = null;
-    try {
-        const payload = JSON.parse(host_read_file(`${PRESET_DIR}/${entry.file}`) || '{}');
-        stateJson = typeof payload.state === 'string'
-            ? payload.state : JSON.stringify(payload.state);
-    } catch (e) {}
-    if (!stateJson) { announce('Preset load failed'); return; }
-    if (typeof host_module_set_param_blocking === 'function')
-        host_module_set_param_blocking('state', stateJson, 1000);
-    else
-        host_module_set_param('state', stateJson);
-    track = Math.max(0, Math.min(5, parseInt(gp('track') || '0', 10)));
-    page = Math.max(0, Math.min(6, parseInt(gp('page') || '0', 10)));
-    stepPage = Math.max(0, Math.min(3, parseInt(gp('step_page') || '0', 10)));
-    fetchAll();
-    presetMode = false;
-    paintAll(true);
-    needsRedraw = true;
-    announce(`Loaded ${entry.name}`);
+    guardPreset(() => {
+        const entry = presets[presetIndex - 1];
+        if (!entry || typeof host_read_file !== 'function') return;
+        let stateJson = null;
+        try {
+            const payload = JSON.parse(host_read_file(`${PRESET_DIR}/${entry.file}`) || '{}');
+            stateJson = typeof payload.state === 'string'
+                ? payload.state : JSON.stringify(payload.state);
+        } catch (e) {}
+        if (!stateJson) { announce('Preset load failed'); return; }
+        if (typeof host_module_set_param_blocking === 'function')
+            host_module_set_param_blocking('state', stateJson, 1000);
+        else
+            host_module_set_param('state', stateJson);
+        track = Math.max(0, Math.min(5, parseInt(gp('track') || '0', 10)));
+        page = Math.max(0, Math.min(6, parseInt(gp('page') || '0', 10)));
+        stepPage = Math.max(0, Math.min(3, parseInt(gp('step_page') || '0', 10)));
+        fetchAll();
+        presetMode = false;
+        paintAll(true);
+        needsRedraw = true;
+        announce(`Loaded ${entry.name}`);
+    }, 'Preset load failed');
 }
 
 function shiftActive() {
