@@ -86,11 +86,28 @@ function confirmText(text) {
     textActive = false;
 }
 
+/* QuickJS `os.readdir` returns a [names, errno] tuple and the raw listing
+ * includes "." and "..". Mocking it as a flat array of filenames hid a bug
+ * that broke every save on hardware, so the stub mirrors the real contract.
+ * `presetDirLeaders` controls whether "."/".." come first (so a real ".json"
+ * sorts last) or last — readdir order is filesystem-defined, and the two
+ * orderings used to fail in different ways. */
+let presetDirLeaders = true;
+let renameErrno = 0;
+let writeFailure = false;
+
 const osModule = {
     readdir(directory) {
-        return directory.endsWith('/presets/mono') ? [...presetFiles] : [];
+        if (!directory.endsWith('/presets/mono')) return [[], 2];
+        const dots = ['.', '..'];
+        return [presetDirLeaders
+            ? [...dots, ...presetFiles]
+            : [...presetFiles, ...dots], 0];
     },
+    /* QuickJS `os.rename` signals failure with a negative return code — it
+     * never throws — so the stub reports refusal the same way. */
     rename(from, to) {
+        if (renameErrno !== 0) return renameErrno;
         const payload = savedFiles.get(from);
         assert.notEqual(payload, undefined, `missing temporary preset ${from}`);
         savedFiles.delete(from);
@@ -122,7 +139,15 @@ const context = vm.createContext({
     host_module_set_param(key, value) { params.set(key, String(value)); },
     host_module_set_param_blocking(key, value) { params.set(key, String(value)); },
     host_ensure_dir() { return true; },
-    host_write_file(file, payload) { savedFiles.set(file, payload); return true; },
+    host_write_file(file, payload) {
+        if (writeFailure) return false;
+        savedFiles.set(file, payload);
+        if (/\.json$/.test(file)) {
+            const name = path.basename(file);
+            if (!presetFiles.includes(name)) presetFiles.push(name);
+        }
+        return true;
+    },
     host_read_file(file) { return savedFiles.get(file); },
     host_suspend_overtake() { suspendCalls++; }
 });
@@ -270,6 +295,82 @@ assert.equal(saved.name, 'Feedback Fix');
 assert.equal(saved.module, 'mono');
 assert.deepEqual(saved.state, {v: 11, data: 'test'});
 assert(announcements.includes('Saved Feedback Fix'));
+
+/* Regression: a saved preset has to come back out of the directory listing.
+ * The reported bug was that saving appeared to do nothing — the file landed on
+ * disk but the browser stayed empty, because os.readdir's [names, errno] tuple
+ * was read as a flat filename array. Reopen the browser and require the preset
+ * to be listed and selectable. */
+const openPresetBrowserUi = () => {
+    cc(MoveShift, 127);
+    cc(MoveMainButton, 127);
+    cc(MoveShift, 0);
+};
+
+openPresetBrowserUi();
+assert.equal(ui.wantsBack(), true, 'Shift + jog click must open the preset browser');
+assert(announcements.includes('Mono presets, 1 saved'),
+    'a saved preset must appear in the browser listing');
+cc(MoveMainKnob, 1);
+assert(announcements.at(-1).includes('Feedback Fix'),
+    'the saved preset must be selectable in the list');
+cc(MoveBack, 127);
+
+/* readdir order is filesystem-defined. With "."/".." last the old code silently
+ * listed nothing; with a real ".json" last it threw and killed the handler.
+ * Both orderings must list exactly the saved presets, and never "." or "..". */
+presetDirLeaders = false;
+openPresetBrowserUi();
+assert.equal(ui.wantsBack(), true,
+    'preset browser must open regardless of readdir entry order');
+assert(announcements.includes('Mono presets, 1 saved'),
+    'trailing "."/".." entries must not hide the preset list');
+cc(MoveBack, 127);
+presetDirLeaders = true;
+
+/* A refused rename must not be reported as a successful save. os.rename
+ * returns -errno instead of throwing, so the old try/catch always claimed
+ * success and left the patch stranded in the .tmp file. */
+renameErrno = -13;
+stateResponses = ['{"v":11,"data":"rename"}'];
+openSaveKeyboard();
+confirmText('Rename Fallback');
+renameErrno = 0;
+assert(presetFiles.includes('Rename Fallback.json'),
+    'a refused rename must still persist the preset via a direct write');
+assert(announcements.includes('Saved Rename Fallback'),
+    'the fallback write is a real save and must be announced as one');
+assert.equal(savedFiles.has(
+    '/data/UserData/schwung/presets/mono/Rename Fallback.json.tmp'), false,
+    'the temporary file must be cleaned up after the fallback write');
+
+openPresetBrowserUi();
+assert(announcements.includes('Mono presets, 2 saved'),
+    'the fallback-written preset must appear in the browser');
+cc(MoveBack, 127);
+
+/* When the write itself fails there is nothing on disk: say so rather than
+ * announcing a save that did not happen. */
+writeFailure = true;
+stateResponses = ['{"v":11,"data":"nowrite"}'];
+openSaveKeyboard();
+confirmText('Doomed Save');
+writeFailure = false;
+assert.equal(presetFiles.includes('Doomed Save.json'), false,
+    'a failed write must not create a preset');
+assert.equal(announcements.at(-1), 'Preset save failed',
+    'a failed write must surface an error instead of a phantom save');
+assert.equal(textActive, false, 'a failed save must still close the keyboard');
+assert.equal(ui.wantsBack(), true,
+    'a failed save must leave the browser open rather than pretending to finish');
+cc(MoveBack, 127);
+assert.equal(ui.wantsBack(), false, 'Back returns to Mono after a failed save');
+
+for (const file of [...presetFiles]) {
+    if (file !== 'Feedback Fix.json') {
+        osModule.remove(`/data/UserData/schwung/presets/mono/${file}`);
+    }
+}
 
 cc(MoveShift, 127);
 cc(MoveMainButton, 127);
