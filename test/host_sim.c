@@ -102,6 +102,12 @@ static int debug_note(mono_t *m) {
     return note;
 }
 
+static unsigned debug_note_events(mono_t *m) {
+    char debug[160];
+    get_string(m, "debug", debug, sizeof(debug));
+    return (unsigned)strtoul(debug, NULL, 10);
+}
+
 static void test_all_machines_sound_distinct(void) {
     uint64_t hashes[MONO_MACHINE_COUNT];
     for (int machine = 0; machine < MONO_MACHINE_COUNT; ++machine) {
@@ -917,6 +923,34 @@ static void test_production_event_paths(void) {
     uint8_t performance_pad[3] = {0x90, 68, 112};
     mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
     assert(render_energy(full, 4) > 1000);
+    mono_destroy(full);
+
+    /* A physical MIDI_IN packet may remain in Schwung's mailbox for more
+     * than one host frame. Overtake must treat that as one held pad rather
+     * than retriggering the envelope on every copy. A fresh press after the
+     * matching release still retriggers immediately. */
+    full = mono_create(&host, 6);
+    assert(full);
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(debug_note_events(full) == 1);
+    uint8_t performance_release[3] = {0x80, 68, 0};
+    mono_on_midi(full, performance_release, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    mono_on_midi(full, performance_release, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert(debug_note_events(full) == 2);
+    mono_destroy(full);
+
+    /* Note-off follows the mapping captured at note-on, even if selection
+     * and octave change while the physical pad is held. */
+    full = mono_create(&host, 6);
+    assert(full);
+    mono_on_midi(full, performance_pad, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    mono_set_param(full, "track", "3");
+    mono_set_param(full, "keyboard_octave", "2");
+    mono_on_midi(full, performance_release, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    mono_set_param(full, "track", "0");
+    assert(debug_note(full) == -1);
     mono_destroy(full);
 
     full = mono_create(&host, 6);

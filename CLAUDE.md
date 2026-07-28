@@ -102,6 +102,11 @@ same base/effective/remember_machine/param-lock path as UI knob edits, so
 CC moves record locks when the sequencer records. The UI polls params and
 reflects DSP-side CC edits on its normal refresh.
 
+Full Mono tracks the 24 raw Move performance pads from press through release.
+Repeated copies of one held physical MIDI_IN event do not retrigger the voice,
+and its note-off uses the track/octave mapping captured at note-on even if the
+performer changes either control while holding the pad.
+
 ## Sequencer
 
 Patterns contain six tracks x 64 steps. A step stores note, velocity, gate,

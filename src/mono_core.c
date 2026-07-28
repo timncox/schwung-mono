@@ -16,6 +16,8 @@
 #define MONO_DELAY_SECONDS 2
 #define MONO_TRACK_FX_SECONDS 1
 #define MONO_CONTROL_INTERVAL 8
+#define MONO_MOVE_PAD_FIRST 68
+#define MONO_MOVE_PAD_COUNT 24
 
 enum {
     TRIG_NOTE = 1,
@@ -288,6 +290,14 @@ struct mono {
     uint8_t  cc_last[3];   /* last external CC accepted (duplicate guard) */
     uint64_t cc_last_frames;
     uint64_t cc_frames;    /* monotonic rendered-frame counter (guard clock) */
+    /* Move's timestamped MIDI_IN records can persist across several host
+     * frames on older Schwung builds. Track raw performance pads so a held
+     * physical press cannot repeatedly retrigger the amp envelope. Keeping
+     * the original track/note mapping also makes note-off safe if the user
+     * changes track or octave before releasing the pad. */
+    uint8_t internal_pad_down[MONO_MOVE_PAD_COUNT];
+    uint8_t internal_pad_track[MONO_MOVE_PAD_COUNT];
+    uint8_t internal_pad_note[MONO_MOVE_PAD_COUNT];
     uint32_t revision;
     uint32_t note_events;
     uint32_t render_blocks;
@@ -2692,14 +2702,28 @@ void mono_on_midi(mono_t *m, const uint8_t *msg, int len, int source) {
         }
         return;
     }
+    int internal_pad = -1;
     if (m->track_count > 1 && source == MOVE_MIDI_SOURCE_INTERNAL) {
         /* Overtake receives raw Move pad note IDs. Let the DSP own the lower
          * three rows directly so sound never depends on an asynchronous JS
          * parameter round-trip; the top row remains reserved for controls. */
-        if (note < 68 || note >= 92) return;
-        track = m->selected_track;
-        note = iclamp(48 + note - 68 + m->track[track].keyboard_octave * 12,
-                      0, 127);
+        if (note < MONO_MOVE_PAD_FIRST ||
+            note >= MONO_MOVE_PAD_FIRST + MONO_MOVE_PAD_COUNT) return;
+        internal_pad = note - MONO_MOVE_PAD_FIRST;
+        if (kind == 0x90 && msg[2] > 0) {
+            if (m->internal_pad_down[internal_pad]) return;
+            track = m->selected_track;
+            note = iclamp(48 + internal_pad +
+                          m->track[track].keyboard_octave * 12, 0, 127);
+            m->internal_pad_down[internal_pad] = 1;
+            m->internal_pad_track[internal_pad] = (uint8_t)track;
+            m->internal_pad_note[internal_pad] = (uint8_t)note;
+        } else if (kind == 0x80 || (kind == 0x90 && msg[2] == 0)) {
+            if (!m->internal_pad_down[internal_pad]) return;
+            track = m->internal_pad_track[internal_pad];
+            note = m->internal_pad_note[internal_pad];
+            m->internal_pad_down[internal_pad] = 0;
+        } else return;
     }
     if (kind == 0x90 && msg[2] > 0) mono_note_on(m, track, note, msg[2]);
     else if (kind == 0x80 || (kind == 0x90 && msg[2] == 0)) mono_note_off(m, track, note);
