@@ -493,54 +493,181 @@ function announcedValue(i, value) {
     return displayValue(i, value);
 }
 
-function parseSteps() {
-    const s = (gp('steps') || '').split(',');
+/* decodeDelta reports ACCUMULATED encoder movement — the shim batches ticks per
+ * SPI frame, so one brisk turn arrives as a single event carrying 20 or more.
+ * Applied raw to a short range (6 machines, 8 track divisions, 5 LFO modes)
+ * that lands on an end stop every time. Cap the magnitude at a quarter of the
+ * range: one detent still moves one, a full-speed spin moves a useful chunk. */
+function scaledMove(delta, min, max) {
+    const span = max - min;
+    const cap = span > 0 ? Math.max(1, Math.ceil(span / 4)) : 1;
+    const mag = Math.min(Math.abs(delta), cap);
+    return delta > 0 ? mag : -mag;
+}
+
+function unpackSteps(raw) {
+    const s = `${raw}`.split(',');
     for (let i = 0; i < 16; i++) steps[i] = parseInt(s[i], 10) || 0;
 }
 
+function parseSteps() {
+    const raw = gp('steps');
+    if (raw !== null && raw !== '') unpackSteps(raw);
+}
+
+/* ------------------------------------------------------------ bulk reads
+ *
+ * A single gp() is a blocking round-trip to the shim, serviced once per SPI
+ * frame (~23 ms) and abandoned after 100 ms — schwung's comment above
+ * js_shadow_get_param calls it "the where-does-the-tick-time-go measurement".
+ * The channel serves roughly 44 reads a second in total, so a sixty-key editor
+ * refresh done one key at a time both takes over a second AND starves every
+ * other reader, which makes reads time out and come back empty.
+ *
+ * Overtake modules get a way out that chain editors do not: BULK_GET, one
+ * round-trip for up to 64 keys. Wire format from shim_handle_param_bulk /
+ * bulk_next in schwung's src/schwung_shim.c — "<count>\n" then records of
+ * "<len>\n<bytes>", request carrying keys and response carrying values in the
+ * same order. Falls back to individual reads on a host without the binding. */
+const BULK_MAX = 48;
+
+function encodeBulk(items) {
+    let s = `${items.length}\n`;
+    for (const it of items) s += `${it.length}\n${it}`;
+    return s;
+}
+
+function decodeBulk(blob, expected) {
+    const out = new Array(expected).fill(null);
+    const s = `${blob}`;
+    let p = 0;
+    const readLen = () => {
+        let n = 0, any = false;
+        while (p < s.length && s[p] >= '0' && s[p] <= '9') {
+            n = n * 10 + (s.charCodeAt(p) - 48); p++; any = true;
+        }
+        if (!any || s[p] !== '\n') return -1;
+        p++;
+        return n;
+    };
+    const count = readLen();
+    if (count < 0) return null;
+    for (let i = 0; i < count && i < expected; i++) {
+        const len = readLen();
+        if (len < 0) return null;
+        out[i] = s.slice(p, p + len);
+        p += len;
+    }
+    return out;
+}
+
+function getParams(keys) {
+    const out = {};
+    if (typeof host_module_get_params !== 'function') {
+        for (const k of keys) out[k] = gp(k);
+        return out;
+    }
+    for (let base = 0; base < keys.length; base += BULK_MAX) {
+        const chunk = keys.slice(base, base + BULK_MAX);
+        const blob = host_module_get_params(encodeBulk(chunk));
+        const vals = (blob === null || blob === undefined)
+            ? null : decodeBulk(blob, chunk.length);
+        if (!vals) {
+            for (const k of chunk) out[k] = gp(k);
+            continue;
+        }
+        for (let i = 0; i < chunk.length; i++) out[chunk[i]] = vals[i];
+    }
+    return out;
+}
+
+/* Keys fetchAll mirrors, declared once so the batch and the unpack cannot
+ * drift apart. `status` is a packed tuple and is read first. */
+const FETCH_KEYS = [
+    'record', 'pattern_start', 'play_order', 'swing', 'track_follow',
+    'track_start', 'track_len', 'track_rotate', 'track_div', 'keyboard_octave',
+    'edit_step', 'step_note', 'step_velocity', 'step_gate', 'step_micro',
+    'step_tie', 'step_accent', 'step_probability', 'step_retrig',
+    'arp_enabled', 'arp_latch', 'arp_mode', 'arp_rate', 'arp_octaves',
+    'arp_gate', 'arp_length', 'arp_velocity', 'arp_offsets',
+    'route_mode', 'route_amount', 'track_fx_type', 'track_fx_amount',
+    'track_fx_tone', 'track_fx_feedback', 'track_fx_mix', 'track_level',
+    'song_enabled', 'song_length', 'song_edit_row', 'song_start',
+    'song_row_length', 'song_repeats', 'song_transpose',
+    'track_states', 'machine', 'steps',
+    'p1','p2','p3','p4','p5','p6','p7','p8',
+    'alt1','alt2','alt3','alt4','alt5','alt6','alt7','alt8'
+];
+
+/* A full editor refresh. Sixty-odd values, but ONE round-trip: at ~23 ms a
+ * blocking read this was over a second of work when done key by key, against
+ * a channel that serves about 44 reads a second in total. */
 function fetchAll() {
     const status = gp('status');
     if (status === null) return false;
     const p = status.split(':');
+    const v = getParams(FETCH_KEYS);
+
+    /* Fall back to the packed status tuple, then to the previous value. A read
+     * that did not come back must never become a literal default: the mirror
+     * gets written back to the DSP on the next knob turn, so inventing a zero
+     * here silently destroys the parameter. */
+    const num = (key, prev, packed) => {
+        const raw = v[key];
+        if (raw !== undefined && raw !== null && raw !== '') {
+            const n = parseInt(raw, 10);
+            if (Number.isFinite(n)) return n;
+        }
+        if (packed !== undefined && packed !== '') {
+            const n = parseInt(packed, 10);
+            if (Number.isFinite(n)) return n;
+        }
+        return prev;
+    };
+
     transport = parseInt(p[0], 10) || 0;
     playStep = parseInt(p[1], 10);
     patternLen = parseInt(p[6], 10) || 16;
-    recordArmed = parseInt(p[7] || gp('record') || '0', 10) !== 0;
-    patternStart = Math.max(0, Math.min(63, parseInt(p[8] || gp('pattern_start') || '0', 10) || 0));
+    recordArmed = num('record', recordArmed ? 1 : 0, p[7]) !== 0;
+    patternStart = Math.max(0, Math.min(63, num('pattern_start', patternStart, p[8])));
     playOrder = Math.max(0, Math.min(PLAY_ORDERS.length - 1,
-        parseInt(p[9] || gp('play_order') || '0', 10) || 0));
-    swing = Math.max(0, Math.min(127, parseInt(gp('swing') || '0', 10) || 0));
-    trackFollow = parseInt(gp('track_follow') || '1', 10) !== 0;
-    trackStart = Math.max(0, Math.min(63, parseInt(gp('track_start') || '0', 10) || 0));
-    trackLen = Math.max(1, Math.min(64 - trackStart, parseInt(gp('track_len') || '16', 10) || 16));
-    trackRotate = Math.max(0, Math.min(63, parseInt(gp('track_rotate') || '0', 10) || 0));
-    trackDiv = Math.max(1, Math.min(8, parseInt(gp('track_div') || '1', 10) || 1));
-    keyboardOctave = Math.max(-4, Math.min(4,
-        parseInt(gp('keyboard_octave') || '0', 10) || 0));
-    editStep = Math.max(0, Math.min(63, parseInt(gp('edit_step') || '0', 10) || 0));
-    stepNote = parseInt(gp('step_note') || '60', 10); stepVelocity = parseInt(gp('step_velocity') || '100', 10);
-    stepGate = parseInt(gp('step_gate') || '100', 10); stepMicro = parseInt(gp('step_micro') || '0', 10);
-    stepTie = parseInt(gp('step_tie') || '0', 10); stepAccent = parseInt(gp('step_accent') || '0', 10);
-    stepProbability = parseInt(gp('step_probability') || '127', 10); stepRetrig = parseInt(gp('step_retrig') || '1', 10);
-    arpEnabled = parseInt(gp('arp_enabled') || '0', 10); arpLatch = parseInt(gp('arp_latch') || '0', 10);
-    arpMode = parseInt(gp('arp_mode') || '0', 10); arpRate = parseInt(gp('arp_rate') || '3', 10);
-    arpOctaves = parseInt(gp('arp_octaves') || '1', 10); arpGate = parseInt(gp('arp_gate') || '92', 10);
-    arpLength = parseInt(gp('arp_length') || '16', 10); arpVelocity = parseInt(gp('arp_velocity') || '0', 10);
-    arpOffsets = (gp('arp_offsets') || '').split(',').map(v => parseInt(v, 10) || 0); while (arpOffsets.length < 16) arpOffsets.push(0);
-    routeMode = parseInt(gp('route_mode') || '0', 10); routeAmount = parseInt(gp('route_amount') || '0', 10);
-    trackFxType = parseInt(gp('track_fx_type') || '0', 10); trackFxAmount = parseInt(gp('track_fx_amount') || '0', 10);
-    trackFxTone = parseInt(gp('track_fx_tone') || '0', 10); trackFxFeedback = parseInt(gp('track_fx_feedback') || '0', 10);
-    trackFxMix = parseInt(gp('track_fx_mix') || '0', 10); trackLevel = parseInt(gp('track_level') || '64', 10);
-    songEnabled = parseInt(gp('song_enabled') || '0', 10); songLength = parseInt(gp('song_length') || '1', 10);
-    songEditRow = parseInt(gp('song_edit_row') || '0', 10); songStart = parseInt(gp('song_start') || '0', 10);
-    songRowLength = parseInt(gp('song_row_length') || '16', 10); songRepeats = parseInt(gp('song_repeats') || '1', 10);
-    songTranspose = parseInt(gp('song_transpose') || '0', 10);
-    const states = (gp('track_states') || '').split(',');
-    for (let i = 0; i < 6; i++) trackStates[i] = parseInt(states[i], 10) || 0;
-    machine = Math.max(0, Math.min(5, parseInt(gp('machine') || '0', 10)));
-    for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
-    for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
-    parseSteps();
+        num('play_order', playOrder, p[9])));
+    swing = Math.max(0, Math.min(127, num('swing', swing)));
+    trackFollow = num('track_follow', trackFollow ? 1 : 0) !== 0;
+    trackStart = Math.max(0, Math.min(63, num('track_start', trackStart)));
+    trackLen = Math.max(1, Math.min(64 - trackStart, num('track_len', trackLen)));
+    trackRotate = Math.max(0, Math.min(63, num('track_rotate', trackRotate)));
+    trackDiv = Math.max(1, Math.min(8, num('track_div', trackDiv)));
+    keyboardOctave = Math.max(-4, Math.min(4, num('keyboard_octave', keyboardOctave)));
+    editStep = Math.max(0, Math.min(63, num('edit_step', editStep)));
+    stepNote = num('step_note', stepNote); stepVelocity = num('step_velocity', stepVelocity);
+    stepGate = num('step_gate', stepGate); stepMicro = num('step_micro', stepMicro);
+    stepTie = num('step_tie', stepTie); stepAccent = num('step_accent', stepAccent);
+    stepProbability = num('step_probability', stepProbability); stepRetrig = num('step_retrig', stepRetrig);
+    arpEnabled = num('arp_enabled', arpEnabled); arpLatch = num('arp_latch', arpLatch);
+    arpMode = num('arp_mode', arpMode); arpRate = num('arp_rate', arpRate);
+    arpOctaves = num('arp_octaves', arpOctaves); arpGate = num('arp_gate', arpGate);
+    arpLength = num('arp_length', arpLength); arpVelocity = num('arp_velocity', arpVelocity);
+    if (v.arp_offsets) {
+        arpOffsets = v.arp_offsets.split(',').map(x => parseInt(x, 10) || 0);
+        while (arpOffsets.length < 16) arpOffsets.push(0);
+    }
+    routeMode = num('route_mode', routeMode); routeAmount = num('route_amount', routeAmount);
+    trackFxType = num('track_fx_type', trackFxType); trackFxAmount = num('track_fx_amount', trackFxAmount);
+    trackFxTone = num('track_fx_tone', trackFxTone); trackFxFeedback = num('track_fx_feedback', trackFxFeedback);
+    trackFxMix = num('track_fx_mix', trackFxMix); trackLevel = num('track_level', trackLevel);
+    songEnabled = num('song_enabled', songEnabled); songLength = num('song_length', songLength);
+    songEditRow = num('song_edit_row', songEditRow); songStart = num('song_start', songStart);
+    songRowLength = num('song_row_length', songRowLength); songRepeats = num('song_repeats', songRepeats);
+    songTranspose = num('song_transpose', songTranspose);
+    if (v.track_states) {
+        const states = v.track_states.split(',');
+        for (let i = 0; i < 6; i++) trackStates[i] = parseInt(states[i], 10) || 0;
+    }
+    machine = Math.max(0, Math.min(5, num('machine', machine)));
+    for (let i = 0; i < 8; i++) values[i] = num(`p${i + 1}`, values[i]);
+    for (let i = 0; i < 8; i++) altValues[i] = num(`alt${i + 1}`, altValues[i]);
+    if (v.steps) unpackSteps(v.steps);
     return true;
 }
 
@@ -651,18 +778,18 @@ function setTrackTiming(key, value, label) {
 
 function adjustSeqSetup(i, delta) {
     focusBank = i >= 4 ? 1 : 0;
-    if (i === 0) setPatternStart(patternStart + delta);
-    else if (i === 1) setPatternLength(patternLen + delta);
-    else if (i === 2) setPlayOrder(playOrder + delta);
-    else if (i === 3) setSwing(swing + delta);
+    if (i === 0) setPatternStart(patternStart + scaledMove(delta, 0, 63));
+    else if (i === 1) setPatternLength(patternLen + scaledMove(delta, 1, 64));
+    else if (i === 2) setPlayOrder(playOrder + scaledMove(delta, 0, PLAY_ORDERS.length - 1));
+    else if (i === 3) setSwing(swing + scaledMove(delta, 0, 127));
     else if (shiftActive()) {
         host_module_set_param('track_follow', '1');
         fetchAll(); paintSteps(false); needsRedraw = true;
         announce(`Track ${track + 1} follows global window`);
-    } else if (i === 4) setTrackTiming('track_start', Math.max(0, Math.min(63, trackStart + delta)), 'Track start');
-    else if (i === 5) setTrackTiming('track_len', Math.max(1, Math.min(64 - trackStart, trackLen + delta)), 'Track length');
-    else if (i === 6) setTrackTiming('track_rotate', (trackRotate + delta + 64) % 64, 'Track rotation');
-    else if (i === 7) setTrackTiming('track_div', Math.max(1, Math.min(8, trackDiv + delta)), 'Track division');
+    } else if (i === 4) setTrackTiming('track_start', Math.max(0, Math.min(63, trackStart + scaledMove(delta, 0, 63))), 'Track start');
+    else if (i === 5) setTrackTiming('track_len', Math.max(1, Math.min(64 - trackStart, trackLen + scaledMove(delta, 1, 64))), 'Track length');
+    else if (i === 6) setTrackTiming('track_rotate', (trackRotate + scaledMove(delta, 0, 63) + 64) % 64, 'Track rotation');
+    else if (i === 7) setTrackTiming('track_div', Math.max(1, Math.min(8, trackDiv + scaledMove(delta, 1, 8))), 'Track division');
 }
 
 function setSetupValue(key, value, label) {
@@ -679,7 +806,7 @@ function adjustSetup(i, delta) {
         const labels = ['Note','Velocity','Gate','Microtiming','Tie','Accent','Probability','Retrig'];
         const values = [stepNote,stepVelocity,stepGate,stepMicro,stepTie,stepAccent,stepProbability,stepRetrig];
         const min = [-1,1,1,-23,0,0,0,1], max = [127,127,127,23,1,127,127,8];
-        const next = i === 4 ? (stepTie ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+        const next = i === 4 ? (stepTie ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + scaledMove(delta, min[i], max[i])));
         setSetupValue(keys[i], next, labels[i]);
         return;
     }
@@ -689,11 +816,11 @@ function adjustSetup(i, delta) {
         const values = [arpEnabled,arpLatch,arpMode,arpRate,arpOctaves,arpGate,arpLength];
         const min = [0,0,0,0,1,1,1], max = [1,1,5,7,4,127,16];
         if (i < 7) {
-            const next = i < 2 ? (values[i] ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+            const next = i < 2 ? (values[i] ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + scaledMove(delta, min[i], max[i])));
             setSetupValue(keys[i], next, labels[i]);
         } else {
-            const next = shiftActive() ? Math.max(0, Math.min(127, arpVelocity + delta))
-                : Math.max(-24, Math.min(24, arpOffsets[setupIndex] + delta));
+            const next = shiftActive() ? Math.max(0, Math.min(127, arpVelocity + scaledMove(delta, 0, 127)))
+                : Math.max(-24, Math.min(24, arpOffsets[setupIndex] + scaledMove(delta, -24, 24)));
             if (shiftActive()) setSetupValue('arp_velocity', next, 'Arp velocity');
             else setSetupValue('arp_offset', `${setupIndex}:${next}`, `Arp step ${setupIndex + 1}`);
         }
@@ -709,7 +836,7 @@ function adjustSetup(i, delta) {
         const labels = [`Input from Track ${track}`,'Input depth','Track effect','Effect amount','Tone','Feedback','Mix','Level'];
         const values = [routeMode,routeAmount,trackFxType,trackFxAmount,trackFxTone,trackFxFeedback,trackFxMix,trackLevel];
         const max = [4,127,6,127,127,127,127,127];
-        setSetupValue(keys[i], Math.max(0, Math.min(max[i], values[i] + delta)), labels[i]);
+        setSetupValue(keys[i], Math.max(0, Math.min(max[i], values[i] + scaledMove(delta, 0, max[i]))), labels[i]);
         return;
     }
     const keys = ['song_enabled','song_length','song_edit_row','song_start','song_row_length','song_repeats','song_transpose'];
@@ -717,13 +844,13 @@ function adjustSetup(i, delta) {
     const values = [songEnabled,songLength,songEditRow,songStart,songRowLength,songRepeats,songTranspose];
     const min = [0,1,0,0,1,1,-24], max = [1,16,15,63,64,16,24];
     if (i < 7) {
-        const next = i === 0 ? (songEnabled ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + delta));
+        const next = i === 0 ? (songEnabled ? 0 : 1) : Math.max(min[i], Math.min(max[i], values[i] + scaledMove(delta, min[i], max[i])));
         setSetupValue(keys[i], next, labels[i]);
     }
 }
 
 function cycleMachine(delta) {
-    machine = (machine + delta + MACHINES.length) % MACHINES.length;
+    machine = (machine + scaledMove(delta, 0, MACHINES.length - 1) + MACHINES.length) % MACHINES.length;
     host_module_set_param('machine', `${machine}`);
     fetchAll(); paintTracks(false); needsRedraw = true;
     announceParameter('Machine', MACHINES[machine]);
@@ -734,12 +861,12 @@ function adjust(i, delta) {
     const target = activeValues();
     let v;
     if (isLfoDestination(i)) {
-        v = Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + delta));
+        v = Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + scaledMove(delta, 0, LFO_DESTS.length - 1)));
     } else if (isLfoMode(i)) {
-        const next = Math.max(0, Math.min(4, lfoModeIndex(target[i]) + delta));
+        const next = Math.max(0, Math.min(4, lfoModeIndex(target[i]) + scaledMove(delta, 0, 4)));
         v = LFO_MODE_VALUES[next];
     } else {
-        v = Math.max(0, Math.min(127, target[i] + delta));
+        v = Math.max(0, Math.min(127, target[i] + scaledMove(delta, 0, 127)));
     }
     if (v === target[i]) return;
     target[i] = v;
@@ -938,7 +1065,11 @@ globalThis.tick = function() {
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
     if (!ready) ready = fetchAll();
-    if (ready && !heldStep) {
+    /* Every other tick, not every tick. This poll is one blocking read, and at
+     * 44 a second it was claiming the entire param channel by itself — which
+     * is what made the editor's own reads time out and come back empty.
+     * Twenty-two playhead updates a second is still smoother than the eye. */
+    if (ready && !heldStep && tickCount % 2 === 0) {
         const oldPlay = playStep, oldTransport = transport, oldRecord = recordArmed;
         pollRuntime();
         if (oldPlay !== playStep) paintSteps(false);
@@ -974,7 +1105,7 @@ globalThis.onMidiMessageInternal = function(data) {
         if (d1 === MoveMute) { muteHeld = d2 > 0; needsRedraw = true; return; }
         if (seqSetup) {
             if (d1 === MoveBack && d2 > 0) { closeSeqSetup(); return; }
-            if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setSetupPage(setupPage + d); return; }
+            if (d1 === MoveMainKnob) { const d = decodeDelta(d2); if (d) setSetupPage(setupPage + (d > 0 ? 1 : -1)); return; }
             if (d1 === MoveLeft && d2 >= 64) { setStepPage(stepPage - 1); return; }
             if (d1 === MoveRight && d2 >= 64) { setStepPage(stepPage + 1); return; }
             if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) {
