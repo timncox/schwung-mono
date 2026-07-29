@@ -9,6 +9,7 @@ test: build/host_sim test-ui
 
 test-ui:
 	node --no-warnings --experimental-vm-modules test/ui_overtake.mjs
+	node --no-warnings --experimental-vm-modules test/ui_chain.mjs
 
 build/host_sim: src/mono_core.c src/mono_core.h test/host_sim.c include/plugin_api_v1.h
 	@mkdir -p build

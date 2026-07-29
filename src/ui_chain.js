@@ -102,9 +102,49 @@ let values = new Array(8).fill(0);
 let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
 
+/* Every gp() is a BLOCKING round-trip to the shim, serviced once per SPI frame
+ * (~23 ms) and abandoned after 100 ms — schwung's comment above
+ * js_shadow_get_param calls it "the where-does-the-tick-time-go measurement".
+ * The channel serves roughly 44 reads a second in total. Two consequences run
+ * through this file:
+ *
+ *   1. fetchAll() is ~20 round-trips, so it must never sit on the input path.
+ *      It used to run from setPage() and setMachine(), making every jog detent
+ *      cost about half a second.
+ *   2. Under contention a read TIMES OUT and returns null. Folding that into a
+ *      default (`gp('p1') || '0'`) silently zeroes the mirror, and the next
+ *      knob turn writes the zero back to the DSP, destroying the parameter.
+ *      Reads that fail must leave the previous value alone.
+ */
 function gp(key) {
     const v = host_module_get_param(key);
     return v === null || v === undefined ? null : String(v);
+}
+
+/* Integer read that reports failure instead of inventing a value. */
+function gpNum(key) {
+    const s = gp(key);
+    if (s === null || s === '') return null;
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) ? n : null;
+}
+
+/* Keep `prev` when the read did not come back. */
+function gpNumOr(key, prev) {
+    const n = gpNum(key);
+    return n === null ? prev : n;
+}
+
+/* decodeDelta reports ACCUMULATED encoder movement — the shim batches ticks per
+ * SPI frame, so one brisk turn arrives as a single event carrying 20 or more.
+ * Applied raw to a short range (6 machines, 9 pages, 6 arp modes) that lands on
+ * an end stop every time. Cap the magnitude at a quarter of the range: one
+ * detent still moves one, a full-speed spin moves a useful chunk. */
+function scaledMove(delta, min, max) {
+    const span = max - min;
+    const cap = span > 0 ? Math.max(1, Math.ceil(span / 4)) : 1;
+    const mag = Math.min(Math.abs(delta), cap);
+    return delta > 0 ? mag : -mag;
 }
 
 function shiftActive() {
@@ -230,28 +270,40 @@ function announcedValue(i, value) {
     return displayValue(i, value);
 }
 
+/* A full refresh. ~20 blocking round-trips, so callers must keep it off the
+ * input path — see refreshSoon(). Every read that fails keeps its previous
+ * value rather than falling back to a literal. */
 function fetchAll() {
-    const mv = gp('machine');
+    const mv = gpNum('machine');
     if (mv === null) return false;
-    machine = Math.max(0, Math.min(MACHINES.length - 1, parseInt(mv, 10) || 0));
-    recordArmed = parseInt(gp('record') || '0', 10) !== 0;
-    arpEnabled = parseInt(gp('arp_enabled') || '0', 10) !== 0;
-    arpLatch = parseInt(gp('arp_latch') || '0', 10) !== 0;
+    machine = Math.max(0, Math.min(MACHINES.length - 1, mv));
+    recordArmed = gpNumOr('record', recordArmed ? 1 : 0) !== 0;
+    arpEnabled = gpNumOr('arp_enabled', arpEnabled ? 1 : 0) !== 0;
+    arpLatch = gpNumOr('arp_latch', arpLatch ? 1 : 0) !== 0;
     arpValues = [arpEnabled ? 1 : 0, arpLatch ? 1 : 0,
-        parseInt(gp('arp_mode') || '0', 10) || 0,
-        parseInt(gp('arp_rate') || '3', 10) || 0,
-        parseInt(gp('arp_octaves') || '1', 10) || 1,
-        parseInt(gp('arp_gate') || '92', 10) || 1,
-        parseInt(gp('arp_length') || '16', 10) || 1,
-        parseInt(gp('arp_velocity') || '0', 10) || 0];
-    arpOffsets = (gp('arp_offsets') || '').split(',').map(v => parseInt(v, 10) || 0);
-    while (arpOffsets.length < 16) arpOffsets.push(0);
-    userWaveMask = parseInt(gp('user_wave_mask') || '0', 10) || 0;
+        gpNumOr('arp_mode', arpValues[2]),
+        gpNumOr('arp_rate', arpValues[3]),
+        gpNumOr('arp_octaves', arpValues[4]),
+        gpNumOr('arp_gate', arpValues[5]),
+        gpNumOr('arp_length', arpValues[6]),
+        gpNumOr('arp_velocity', arpValues[7])];
+    const offsets = gp('arp_offsets');
+    if (offsets !== null && offsets !== '') {
+        arpOffsets = offsets.split(',').map(v => parseInt(v, 10) || 0);
+        while (arpOffsets.length < 16) arpOffsets.push(0);
+    }
+    userWaveMask = gpNumOr('user_wave_mask', userWaveMask);
     if (page < SOUND_PAGES) host_module_set_param('page', `${page}`);
-    for (let i = 0; i < 8; i++) values[i] = parseInt(gp(`p${i + 1}`) || '0', 10);
-    for (let i = 0; i < 8; i++) altValues[i] = parseInt(gp(`alt${i + 1}`) || '0', 10);
+    for (let i = 0; i < 8; i++) values[i] = gpNumOr(`p${i + 1}`, values[i]);
+    for (let i = 0; i < 8; i++) altValues[i] = gpNumOr(`alt${i + 1}`, altValues[i]);
     return true;
 }
+
+/* Ask for a full refresh on a later tick. setPage() and setMachine() used to
+ * call fetchAll() inline, so a jog turn through the nine pages cost ~20
+ * round-trips per detent — most of a second of frozen UI each time. */
+let refreshPending = false;
+function refreshSoon() { refreshPending = true; }
 
 function toggleRecord() {
     recordArmed = !recordArmed;
@@ -264,7 +316,7 @@ function setPage(next) {
     page = (next + PAGES.length) % PAGES.length;
     focusBank = 0;
     if (page < SOUND_PAGES) host_module_set_param('page', `${page}`);
-    fetchAll();
+    refreshSoon();
     announce(`${PAGES[page]} page`);
     needsRedraw = true;
 }
@@ -272,7 +324,7 @@ function setPage(next) {
 function setMachine(next) {
     machine = (next + MACHINES.length) % MACHINES.length;
     host_module_set_param('machine', `${machine}`);
-    fetchAll();
+    refreshSoon();
     announceParameter('Machine', MACHINES[machine]);
     needsRedraw = true;
 }
@@ -284,7 +336,8 @@ function adjust(i, delta) {
             'arp_octaves','arp_gate','arp_length','arp_velocity'];
         const low = [0,0,0,0,1,1,1,0], high = [1,1,5,7,4,127,16,127];
         const v = i < 2 ? (arpValues[i] ? 0 : 1)
-            : Math.max(low[i], Math.min(high[i], arpValues[i] + delta));
+            : Math.max(low[i], Math.min(high[i],
+                arpValues[i] + scaledMove(delta, low[i], high[i])));
         if (v === arpValues[i] && i >= 2) return;
         arpValues[i] = v;
         if (i === 0) arpEnabled = v !== 0;
@@ -296,7 +349,8 @@ function adjust(i, delta) {
     }
     if (page === ARP_STEP_PAGE) {
         const offsetIndex = i + (shiftLayer() ? 8 : 0);
-        const v = Math.max(-24, Math.min(24, arpOffsets[offsetIndex] + delta));
+        const v = Math.max(-24, Math.min(24,
+            arpOffsets[offsetIndex] + scaledMove(delta, -24, 24)));
         if (v === arpOffsets[offsetIndex]) return;
         arpOffsets[offsetIndex] = v;
         host_module_set_param('arp_offset', `${offsetIndex}:${v}`);
@@ -307,12 +361,14 @@ function adjust(i, delta) {
     const target = activeValues();
     let v;
     if (isLfoDestination(i)) {
-        v = Math.max(0, Math.min(LFO_DESTS.length - 1, destinationIndex(target[i]) + delta));
+        v = Math.max(0, Math.min(LFO_DESTS.length - 1,
+            destinationIndex(target[i]) + scaledMove(delta, 0, LFO_DESTS.length - 1)));
     } else if (isLfoMode(i)) {
-        const next = Math.max(0, Math.min(4, lfoModeIndex(target[i]) + delta));
+        const next = Math.max(0, Math.min(4,
+            lfoModeIndex(target[i]) + scaledMove(delta, 0, 4)));
         v = LFO_MODE_VALUES[next];
     } else {
-        v = Math.max(0, Math.min(127, target[i] + delta));
+        v = Math.max(0, Math.min(127, target[i] + scaledMove(delta, 0, 127)));
     }
     if (v === target[i]) return;
     target[i] = v;
@@ -360,13 +416,28 @@ globalThis.onResume = function() { ready = fetchAll(); needsRedraw = true; };
 globalThis.tick = function() {
     tickCount++;
     if (!ready) ready = fetchAll();
-    if (ready && tickCount % 6 === 0) {
-        const nextRecord = parseInt(gp('record') || '0', 10) !== 0;
+
+    /* A page or machine change asked for a refresh; do it here rather than on
+     * the input path, so the jog wheel stays responsive while it happens. */
+    if (ready && refreshPending) {
+        refreshPending = false;
+        fetchAll();
+        needsRedraw = true;
+    } else if (ready && tickCount % 6 === 0) {
+        const nextRecord = gpNumOr('record', recordArmed ? 1 : 0) !== 0;
         if (nextRecord !== recordArmed) {
             recordArmed = nextRecord;
             needsRedraw = true;
         }
-        if (page >= ARP_PAGE) { fetchAll(); needsRedraw = true; }
+        /* The arp pages used to run a whole fetchAll() here — twenty
+         * round-trips six times a second, three times what the param channel
+         * can serve, which is what made reads elsewhere time out. Once a
+         * second is plenty for reflecting an edit made from the browser
+         * editor. */
+        if (page >= ARP_PAGE && tickCount % 48 === 0) {
+            fetchAll();
+            needsRedraw = true;
+        }
     }
     const active = shiftActive();
     if (active !== shiftVisual) { shiftVisual = active; needsRedraw = true; }
@@ -380,7 +451,9 @@ globalThis.onMidiMessageInternal = function(data) {
     if (cc === MoveRec && val > 0) { toggleRecord(); return; }
     if (cc === MoveMainKnob) {
         const d = decodeDelta(val);
-        if (d) shiftActive() ? setMachine(machine + d) : setPage(page + d);
+        if (d) shiftActive()
+            ? setMachine(machine + scaledMove(d, 0, MACHINES.length - 1))
+            : setPage(page + scaledMove(d, 0, PAGES.length - 1));
         return;
     }
     if (cc === MoveLeft && val >= 64) { setPage(page - 1); return; }
