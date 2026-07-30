@@ -41,6 +41,14 @@ const params = new Map([
 
 let stateResponses = [];
 let stateCalls = 0;
+/* Blocking round-trips to the shim. Counting them is the point: each costs a
+ * whole SPI frame (~23 ms) and the channel serves only ~44 a second, so a UI
+ * that is correct but chatty still freezes on the Move. */
+let roundTrips = 0;
+/* When positive, reads time out and return null — what actually happens once
+ * the param channel is saturated. The mock used to answer '0' for everything,
+ * so this failure mode could not be reproduced at all. */
+let readFailures = 0;
 const savedFiles = new Map();
 const presetFiles = [];
 const announcements = [];
@@ -130,11 +138,47 @@ const context = vm.createContext({
     clear_screen() {}, print() {}, fill_rect() {},
     move_midi_internal_send() {},
     host_module_get_param(key) {
+        roundTrips++;
         if (key === 'state') {
             stateCalls++;
             return stateResponses.length ? stateResponses.shift() : undefined;
         }
+        if (readFailures > 0) { readFailures--; return null; }
         return params.get(key) ?? '0';
+    },
+    /* BULK_GET, transcribed from shim_handle_param_bulk / bulk_next in
+     * schwung's src/schwung_shim.c — NOT from the code under test. Request is
+     * "<count>\n" then count records of "<len>\n<key>"; response is the same
+     * shape carrying values in the same order. The shim rejects >64 items. */
+    host_module_get_params(blob) {
+        roundTrips++;
+        if (readFailures > 0) { readFailures--; return null; }
+        const text = String(blob);
+        let at = 0;
+        const readLen = () => {
+            let n = 0, any = false;
+            while (at < text.length && text[at] >= '0' && text[at] <= '9') {
+                n = n * 10 + (text.charCodeAt(at) - 48); at++; any = true;
+            }
+            if (!any || text[at] !== '\n') return -1;
+            at++;
+            return n;
+        };
+        const count = readLen();
+        if (count < 0 || count > 64) return null;
+        const keys = [];
+        for (let i = 0; i < count; i++) {
+            const len = readLen();
+            if (len < 0) return null;
+            keys.push(text.slice(at, at + len));
+            at += len;
+        }
+        let out = `${keys.length}\n`;
+        for (const k of keys) {
+            const value = params.get(k) ?? '0';
+            out += `${value.length}\n${value}`;
+        }
+        return out;
     },
     host_module_set_param(key, value) { params.set(key, String(value)); },
     host_module_set_param_blocking(key, value) { params.set(key, String(value)); },
@@ -206,13 +250,26 @@ assert.equal(noteLedMessages.some(message => message.note === MoveRec), false,
 cc(MoveShift, 127);
 noteOn(99);
 cc(MoveShift, 0);
-cc(MoveMainKnob, 3);
+/* Three detents to reach ROUTING + FX. This used to be one event carrying an
+ * accumulated delta of 3, which jumped three pages at once — decodeDelta
+ * reports accumulated movement, so that made a brisk flick skip most of the
+ * setup pages. The jog now advances one page per event. */
+cc(MoveMainKnob, 1);
+cc(MoveMainKnob, 1);
+cc(MoveMainKnob, 1);
 cc(MoveKnob1, 4);
 assert.equal(params.get('route_mode') ?? '0', '0',
     'Track 1 must reject neighbor routing because it has no source');
 assert(announcements.at(-1).includes('Track 1 has no previous routing source'));
 noteOn(93);
-cc(MoveKnob1, 4);
+/* route_mode has five values, so a knob detent moves it one. This used to be a
+ * single event carrying an accumulated delta of 4, which only landed on FM
+ * because the number happened to match — any faster turn would have slammed to
+ * the same end, and modes 1-3 were unreachable by a normal turn. */
+cc(MoveKnob1, 1);
+cc(MoveKnob1, 1);
+cc(MoveKnob1, 1);
+cc(MoveKnob1, 1);
 assert.equal(params.get('route_mode'), '4',
     'Track 2 must accept FM from Track 1 on the receiving track');
 assert(announcements.at(-1).includes('Input from Track 1'));
@@ -398,4 +455,139 @@ assert.equal(textCloseCalls, 1);
 assert.deepEqual(buttonLedMessages.at(-1), {cc: MoveRec, color: constants.Black, force: true},
     'unload must clear the Record button');
 
-console.log('mono overtake UI: presets, routing, and LED tests passed');
+/* ------------------------------------------------- param-channel behaviour
+ *
+ * These exist because Work shipped three hardware bugs that were all one
+ * cause: host_module_get_param is a blocking round-trip to the shim, serviced
+ * once per SPI frame (~23 ms) and abandoned after 100 ms. Reading dozens of
+ * keys freezes the UI, saturating the channel makes OTHER reads time out, and
+ * a timed-out read folded into a default silently rewrites the patch.
+ */
+
+/* The channel serves roughly 44 reads a second in total. A UI that asks for
+ * more than that starves itself and everything else. */
+ui.init();
+roundTrips = 0;
+for (let i = 0; i < 44; i++) ui.tick();          /* one second of ticks */
+assert(roundTrips <= 30,
+    `steady state costs ${roundTrips} blocking round-trips per second against a ` +
+    'channel that serves about 44 — this is what makes reads time out');
+
+/* ...and a full editor refresh must be batched, not sixty separate frames. */
+let bulkSeen = false;
+const realBulk = context.host_module_get_params;
+context.host_module_get_params = function(blob) { bulkSeen = true; return realBulk(blob); };
+roundTrips = 0;
+for (let i = 0; i < 31; i++) ui.tick();          /* crosses the %30 refresh */
+assert(bulkSeen, 'the full refresh never used the bulk get_params path');
+
+/* Decoding the bulk response wrong shifts every value onto a neighbouring key,
+ * which looks like working software right up until a knob edits the wrong
+ * parameter. track_div can only have reached the mirror through a bulk
+ * response, so continuing from it proves the alignment. */
+/* Close whatever view earlier tests left open — Sequence Setup and the preset
+ * browser both intercept the knobs before adjust() sees them. */
+cc(MoveBack, 127);
+cc(MoveBack, 127);
+params.set('p1', '40');
+params.set('p2', '90');
+ui.init();
+cc(MoveKnob1, 1);
+assert.equal(params.get('p1'), '41',
+    `p1 continued from the wrong base: got ${params.get('p1')}, expected 41`);
+cc(MoveKnob1 + 1, 1);
+assert.equal(params.get('p2'), '91',
+    `p2 continued from the wrong base: got ${params.get('p2')}, expected 91`);
+
+/* A dead param channel must not turn the mirror into zeros, and above all must
+ * not write those zeros back to the DSP. */
+params.set('track_level', '96');
+ui.init();
+readFailures = 500;
+for (let i = 0; i < 60; i++) ui.tick();
+readFailures = 0;
+assert.equal(params.get('track_level'), '96',
+    'a timed-out read must leave the DSP alone, not write a default back');
+
+
+/* [file, table, engine count, consequence of drift] */
+const FX_N = cEnumCount("src/mono_core.h", "MONO_MACHINE_COUNT");
+const DESTS = cDefineCount("src/mono_core.h",
+    (n) => n("MONO_PAGES") * n("MONO_PAGE_PARAMS") * 2 + 2);
+const ENGINE_INDEXED_TABLES = [
+    ["src/ui_overtake.js", "MACHINES",        FX_N,  "a machine would show no name"],
+    ["src/ui_overtake.js", "MACHINE_SHORT",   FX_N,  "a machine would show no short name"],
+    ["src/ui_overtake.js", "MACHINE_COLORS",  FX_N,  "a machine pad would light with no colour"],
+    ["src/ui_overtake.js", "LFO_DESTS",       DESTS, "THE DANGEROUS ONE: this list is not labels, it is the destination VALUE written to the engine. Drift both mislabels every entry past the insertion point and routes modulation to the wrong parameter"],
+    ["src/ui_overtake.js", "LFO_DEST_SCREEN", DESTS, "the screen labels would name the wrong parameter"],
+    ["src/ui_chain.js",    "MACHINES",        FX_N,  "a machine would show no name"],
+    ["src/ui_chain.js",    "LFO_DESTS",       DESTS, "modulation would route to the wrong parameter"],
+    ["src/ui_chain.js",    "LFO_DEST_SCREEN", DESTS, "the screen labels would name the wrong parameter"]
+];
+
+/* ------------------------------------------------- engine-indexed tables
+ *
+ * These arrays are hand-maintained in JavaScript but INDEXED BY A CODE THE
+ * ENGINE OWNS. Nothing links the two — no import, no compiler — so growing the
+ * C enum silently leaves the UI stale, and the symptom is invisible: the last
+ * entry becomes unreachable, or a label names the wrong thing. That exact shape
+ * made two machines unreachable in the sibling module Work before anyone
+ * noticed, because it never throws.
+ *
+ * They cannot be derived (a colour or an abbreviation is a design choice, not
+ * engine data), so the drift is made LOUD here instead. The counts come from
+ * the C header itself, which is the only source of truth in the repo.
+ */
+function cEnumCount(header, terminator) {
+    const src = fs.readFileSync(path.join(root, header), 'utf8');
+    const at = src.indexOf(terminator);
+    assert(at > 0, `${terminator} not found in ${header}`);
+    const open = src.lastIndexOf('{', at);
+    const body = src.slice(open + 1, at)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+    return (body.match(/\b[A-Z_][A-Z0-9_]*\s*(?:=[^,]*)?,/g) || []).length;
+}
+
+function cDefineCount(header, expr) {
+    const src = fs.readFileSync(path.join(root, header), 'utf8');
+    const num = (name) => {
+        const m = src.match(new RegExp('#define\\s+' + name + '\\s+(\\d+)'));
+        return m ? parseInt(m[1], 10) : null;
+    };
+    return expr(num);
+}
+
+/* Count top-level items in `const NAME = [...]`, balancing brackets so nested
+ * arrays and objects count as one. */
+function jsArrayLen(file, name) {
+    const src = fs.readFileSync(path.join(root, file), 'utf8');
+    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\['));
+    assert(m, `${name} not found in ${file}`);
+    let i = m.index + m[0].length - 1, depth = 0, end = -1;
+    for (let k = i; k < src.length; k++) {
+        const c = src[k];
+        if (c === '[') depth++;
+        else if (c === ']') { depth--; if (depth === 0) { end = k; break; } }
+    }
+    const body = src.slice(i + 1, end)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+    let d = 0, count = 0, cur = '';
+    for (const c of body) {
+        if ('[{('.includes(c)) d++;
+        else if (']})'.includes(c)) d--;
+        if (c === ',' && d === 0) { if (cur.trim()) count++; cur = ''; }
+        else cur += c;
+    }
+    if (cur.trim()) count++;
+    return count;
+}
+
+for (const [file, table, expected, why] of ENGINE_INDEXED_TABLES) {
+    const got = jsArrayLen(file, table);
+    assert.equal(got, expected,
+        `${file}: ${table} has ${got} entries but the engine has ${expected} — ${why}`);
+}
+
+console.log('mono overtake UI: presets, routing, LED, and param-channel tests passed');
