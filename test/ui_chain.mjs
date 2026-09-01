@@ -323,5 +323,28 @@ assert.equal(ccWrite?.value, '78',
     `after a dead channel the CC follower wrote p1=${ccWrite?.value}; it must ` +
     'continue from 77');
 
+/* 8. A page read that times out must be RETRIED on the next poll, not
+ *    forgotten. Reads DO time out under contention — that is the premise of
+ *    this whole file — and retiring the pending refresh on a failed read
+ *    leaves the mirror stale until the next CC happens to arrive, which is
+ *    precisely the bug this feature exists to fix. */
+params.set('machine', '0');
+for (let i = 1; i <= 8; i++) { params.set(`p${i}`, '64'); params.set(`alt${i}`, '64'); }
+ui.init();
+settle(8);
+let dropPageReads = 1;
+const passthrough = context.host_module_get_param;
+context.host_module_get_param = (key) => {
+    if (key === 'page_values' && dropPageReads > 0) { dropPageReads--; return null; }
+    return passthrough(key);
+};
+externalCC(0, 100);
+printed.length = 0;
+settle(24);
+context.host_module_get_param = passthrough;
+assert(printed.includes('100'),
+    'the page read timed out once and the CC update was dropped for good — ' +
+    'a failed read must be retried, not treated as a completed refresh');
+
 console.log('mono chain UI: param-channel, knob response, refresh, and ' +
     'external-CC follow tests passed');

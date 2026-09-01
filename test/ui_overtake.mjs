@@ -564,6 +564,33 @@ assert.equal(keyReads.get('page_values'), 0,
     `ten knob detents caused ${keyReads.get('page_values')} page_values reads — ` +
     'the editor is following its own writes rather than external CC');
 
+/* A page read that times out must be retried, not forgotten — retiring the
+ * pending refresh on a failed read leaves the mirror stale until the next CC. */
+params.set('p1', '64');
+ui.init();
+/* Advance to just past a periodic fetchAll (one every 60 ticks) so the window
+ * below cannot be rescued by one. Without this the test is vacuous: whether it
+ * catches the dropped read depends on where tickCount happens to sit. */
+let bulkHits = 0;
+const realBulkFn = context.host_module_get_params;
+context.host_module_get_params = function (blob) { bulkHits++; return realBulkFn(blob); };
+for (let i = 0; i < 200 && bulkHits === 0; i++) ui.tick();
+context.host_module_get_params = realBulkFn;
+assert(bulkHits > 0, 'never observed a periodic bulk refresh to synchronise against');
+let dropPageReads = 1;
+const passthrough = context.host_module_get_param;
+context.host_module_get_param = (key) => {
+    if (key === 'page_values' && dropPageReads > 0) { dropPageReads--; return null; }
+    return passthrough(key);
+};
+externalCC(0, 100);
+for (let i = 0; i < 12; i++) ui.tick();
+context.host_module_get_param = passthrough;
+cc(MoveKnob1, 1);
+assert.equal(params.get('p1'), '101',
+    `the page read timed out once and the CC update was dropped: the knob wrote ` +
+    `${params.get('p1')}. A failed read must be retried, not retired.`);
+
 
 /* [file, table, engine count, consequence of drift] */
 const FX_N = cEnumCount("src/mono_core.h", "MONO_MACHINE_COUNT");

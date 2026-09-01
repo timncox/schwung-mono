@@ -691,12 +691,14 @@ function pollRuntime() {
      * counts this editor's own knob writes, so watching that would make the
      * editor chase its own tail. */
     const rev = parseInt(fields[4], 10);
-    ccMoved = false;
     if (Number.isFinite(rev) && rev !== ccRevision) {
         /* The first poll only adopts the counter — fetchAll() ran at init. */
         if (ccRevision !== null) ccMoved = true;
         ccRevision = rev;
     }
+    /* ccMoved is deliberately NOT cleared here. It is cleared only once the
+     * page read has actually landed, so a timed-out read is retried rather
+     * than dropped — dropping it leaves the mirror stale until the next CC. */
     return true;
 }
 
@@ -705,13 +707,15 @@ function pollRuntime() {
  * the screen keeps the old number and the next knob turn sends stale+delta,
  * undoing the CC. Reading the mirror back key-by-key would cost sixteen
  * blocking reads, so the engine serves them joined as "p1,..,p8|alt1,..,alt8". */
+/* true if a value moved, false if none did, NULL if the read did not come
+ * back — see the chain editor for why the difference matters. */
 function fetchPageValues() {
     const raw = gp('page_values');
-    if (raw === null || raw === '') return false;
+    if (raw === null || raw === '') return null;
     const banks = raw.split('|');
-    if (banks.length < 2) return false;
+    if (banks.length < 2) return null;
     const primary = banks[0].split(','), alt = banks[1].split(',');
-    if (primary.length < 8 || alt.length < 8) return false;
+    if (primary.length < 8 || alt.length < 8) return null;
     let moved = false;
     for (let i = 0; i < 8; i++) {
         const pv = parseInt(primary[i], 10), av = parseInt(alt[i], 10);
@@ -1117,7 +1121,13 @@ globalThis.tick = function() {
         }
         /* Follow an external CC now rather than waiting for the periodic
          * fetchAll below, which is up to sixty ticks away. */
-        if (ccMoved && fetchPageValues()) needsRedraw = true;
+        if (ccMoved) {
+            const moved = fetchPageValues();
+            if (moved !== null) {
+                ccMoved = false;
+                if (moved) needsRedraw = true;
+            }
+        }
         if (tickCount % 30 === 0) {
             const oldScreen = `${machine}:${keyboardOctave}:${values.join(',')}:${altValues.join(',')}`;
             const oldSteps = steps.join(','), oldTracks = trackStates.join(',');

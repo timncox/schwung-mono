@@ -321,13 +321,17 @@ function refreshSoon() { refreshPending = true; }
  * Refreshing that mirror with sixteen separate reads would cost most of a
  * second per CC and saturate the channel during a controller sweep, so the
  * engine serves them joined: "p1,..,p8|alt1,..,alt8". */
+/* Returns true if a value moved, false if none did, and NULL if the read did
+ * not come back. The caller must not retire the pending refresh on null — a
+ * read that timed out has corrected nothing, and treating it as "done" leaves
+ * the mirror stale until the NEXT CC arrives, which is the original bug. */
 function fetchPageValues() {
     const raw = gp('page_values');
-    if (raw === null || raw === '') return false;
+    if (raw === null || raw === '') return null;
     const banks = raw.split('|');
-    if (banks.length < 2) return false;
+    if (banks.length < 2) return null;
     const primary = banks[0].split(','), alt = banks[1].split(',');
-    if (primary.length < 8 || alt.length < 8) return false;
+    if (primary.length < 8 || alt.length < 8) return null;
     let moved = false;
     for (let i = 0; i < 8; i++) {
         const pv = parseInt(primary[i], 10), av = parseInt(alt[i], 10);
@@ -480,10 +484,20 @@ globalThis.tick = function() {
                 needsRedraw = true;
             }
             if (Number.isFinite(rev) && rev !== ccRevision) {
-                /* First poll only adopts the counter; there is nothing stale
-                 * to correct because init() just read everything. */
-                if (ccRevision !== null && fetchPageValues()) needsRedraw = true;
-                ccRevision = rev;
+                if (ccRevision === null) {
+                    /* First poll only adopts the counter; there is nothing
+                     * stale to correct because init() just read everything. */
+                    ccRevision = rev;
+                } else {
+                    const moved = fetchPageValues();
+                    /* Only retire the pending refresh once the read actually
+                     * landed, so a timed-out read is retried next poll instead
+                     * of being silently forgotten. */
+                    if (moved !== null) {
+                        if (moved) needsRedraw = true;
+                        ccRevision = rev;
+                    }
+                }
             }
         }
         /* The arp pages used to run a whole fetchAll() here — twenty
