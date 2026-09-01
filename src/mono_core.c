@@ -288,6 +288,11 @@ struct mono {
     uint8_t  cc_last[3];   /* last external CC accepted (duplicate guard) */
     uint64_t cc_last_frames;
     uint64_t cc_frames;    /* monotonic rendered-frame counter (guard clock) */
+    /* Bumped ONLY by mono_cc_param, i.e. only when an external CC writes a
+     * parameter. `revision` cannot serve this purpose: mono_set_param bumps it
+     * too, so a UI watching `revision` would fire on its own knob writes and
+     * re-read the value it just sent. Runtime only — never serialized. */
+    uint32_t cc_revision;
     uint32_t revision;
     uint32_t note_events;
     uint32_t render_blocks;
@@ -2634,6 +2639,9 @@ static void mono_cc_param(mono_t *m, int track, int cc, int v) {
         step_set_lock(step, pid);
         step->lock_values[pid] = t->base[pid];
     }
+    /* Tell the editors a value moved under them. Only external CC lands here,
+     * so a UI can follow this counter without chasing its own writes. */
+    ++m->cc_revision;
     changed(m);
 }
 
@@ -3866,6 +3874,29 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "track_play_step")) return snprintf(buf, (size_t)buf_len, "%d", t->play_step);
     if (!strcmp(key, "keyboard_octave")) return snprintf(buf, (size_t)buf_len, "%d", t->keyboard_octave);
     if (!strcmp(key, "machine")) return snprintf(buf, (size_t)buf_len, "%d", t->machine);
+    /* One read that tells an editor whether anything moved under it. The Move
+     * UIs poll this instead of "record" — same single round-trip on the ~23 ms
+     * param channel, but it also carries the external-CC counter, so a CC edit
+     * can be followed without a periodic blind refresh. */
+    if (!strcmp(key, "ui_poll"))
+        return snprintf(buf, (size_t)buf_len, "%u:%d", m->cc_revision, m->record_locks);
+    /* The selected page's eight primary values and its eight Shift-bank
+     * values, in ONE read. Refreshing them individually is sixteen blocking
+     * round-trips; following a CC sweep at that price would claim the whole
+     * channel. Same layout param_id() gives p1..p8 and alt1..alt8. */
+    if (!strcmp(key, "page_values")) {
+        int n = 0;
+        for (int i = 0; i < 2 * MONO_PAGE_PARAMS; ++i) {
+            int bank = i / MONO_PAGE_PARAMS, slot = i % MONO_PAGE_PARAMS;
+            int vid = bank ? MONO_SHIFT_BASE + m->selected_page * MONO_PAGE_PARAMS + slot
+                           : m->selected_page * MONO_PAGE_PARAMS + slot;
+            const char *sep = i == 0 ? "" : (slot == 0 ? "|" : ",");
+            int wrote = snprintf(buf + n, (size_t)(buf_len - n), "%s%d", sep, t->base[vid]);
+            if (wrote < 0 || wrote >= buf_len - n) break;
+            n += wrote;
+        }
+        return n;
+    }
     int pid = param_id(m, key);
     if (pid >= 0) {
         return snprintf(buf, (size_t)buf_len, "%d", t->base[pid]);
@@ -3902,9 +3933,13 @@ int mono_get_param(mono_t *m, const char *key, char *buf, int buf_len) {
         return snprintf(buf, (size_t)buf_len, "%u:%d:%d:%.0f:%d",
                         m->revision, m->transport, m->seq_step, bpm_now(m),
                         m->record_locks);
+    /* Field 5 is the external-CC counter, appended for the overtake editor so
+     * it follows CC edits without paying a second round-trip. Append-only:
+     * web_ui.html splits this tuple and indexes fields 0-3. */
     if (!strcmp(key, "rui_play"))
-        return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f:%d",
-                        m->transport, t->play_step, bpm_now(m), m->record_locks);
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%.0f:%d:%u",
+                        m->transport, t->play_step, bpm_now(m), m->record_locks,
+                        m->cc_revision);
     if (!strcmp(key, "debug"))
         return snprintf(buf, (size_t)buf_len,
                         "%u:%d:%d:%u:%u:%u:%d:%d:%d:%d:%d:%d:%d",

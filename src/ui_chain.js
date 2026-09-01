@@ -101,6 +101,10 @@ let arpOffsets = new Array(16).fill(0);
 let values = new Array(8).fill(0);
 let altValues = new Array(8).fill(0);
 let needsRedraw = true, ready = false, focusBank = 0;
+/* Last external-CC counter seen from the engine. `null` means "not read yet" —
+ * the first successful poll adopts the engine's value without triggering a
+ * refresh, so mounting the editor does not cost a page read. */
+let ccRevision = null;
 
 /* Every gp() is a BLOCKING round-trip to the shim, serviced once per SPI frame
  * (~23 ms) and abandoned after 100 ms — schwung's comment above
@@ -305,6 +309,40 @@ function fetchAll() {
 let refreshPending = false;
 function refreshSoon() { refreshPending = true; }
 
+/* Pull the visible page's sixteen values in ONE round-trip.
+ *
+ * This exists because external MIDI CC edits the DSP directly and this editor
+ * never hears about it: an external CC arrives on the audio process's on_midi
+ * (schwung routes cable 2 to the DSP, and onMidiMessageExternal is an
+ * overtake-only hook — a chain UI cannot see external MIDI at all). So the
+ * mirror in values[]/altValues[] went stale, the screen kept showing the old
+ * number, and the next knob turn sent stale+delta and undid the CC.
+ *
+ * Refreshing that mirror with sixteen separate reads would cost most of a
+ * second per CC and saturate the channel during a controller sweep, so the
+ * engine serves them joined: "p1,..,p8|alt1,..,alt8". */
+/* Returns true if a value moved, false if none did, and NULL if the read did
+ * not come back. The caller must not retire the pending refresh on null — a
+ * read that timed out has corrected nothing, and treating it as "done" leaves
+ * the mirror stale until the NEXT CC arrives, which is the original bug. */
+function fetchPageValues() {
+    const raw = gp('page_values');
+    if (raw === null || raw === '') return null;
+    const banks = raw.split('|');
+    if (banks.length < 2) return null;
+    const primary = banks[0].split(','), alt = banks[1].split(',');
+    if (primary.length < 8 || alt.length < 8) return null;
+    let moved = false;
+    for (let i = 0; i < 8; i++) {
+        const pv = parseInt(primary[i], 10), av = parseInt(alt[i], 10);
+        /* A malformed field keeps the previous value, exactly as a failed
+         * single-key read does — never fold a bad read into a literal. */
+        if (Number.isFinite(pv) && pv !== values[i]) { values[i] = pv; moved = true; }
+        if (Number.isFinite(av) && av !== altValues[i]) { altValues[i] = av; moved = true; }
+    }
+    return moved;
+}
+
 function toggleRecord() {
     recordArmed = !recordArmed;
     host_module_set_param('record', recordArmed ? '1' : '0');
@@ -411,7 +449,11 @@ globalThis.init = function() {
     announceView('Mono Voice');
 };
 
-globalThis.onResume = function() { ready = fetchAll(); needsRedraw = true; };
+globalThis.onResume = function() {
+    ready = fetchAll();
+    ccRevision = null;   /* fetchAll just made the mirror current */
+    needsRedraw = true;
+};
 
 globalThis.tick = function() {
     tickCount++;
@@ -423,11 +465,40 @@ globalThis.tick = function() {
         refreshPending = false;
         fetchAll();
         needsRedraw = true;
-    } else if (ready && tickCount % 6 === 0) {
-        const nextRecord = gpNumOr('record', recordArmed ? 1 : 0) !== 0;
-        if (nextRecord !== recordArmed) {
-            recordArmed = nextRecord;
-            needsRedraw = true;
+    } else if (ready && tickCount % 4 === 0) {
+        /* One read carries both the record-arm state and the external-CC
+         * counter, so following CC costs nothing extra while it is idle. The
+         * counter is bumped ONLY by mono_cc_param, never by mono_set_param —
+         * watching the engine's general `revision` here would fire on this
+         * editor's own knob writes and re-read what it just sent. */
+        const poll = gp('ui_poll');
+        if (poll !== null) {
+            const fields = poll.split(':');
+            const rev = parseInt(fields[0], 10);
+            /* NaN !== 0 is true, so an absent or malformed field would arm
+             * recording on its own. A field that did not parse keeps the
+             * previous value, like every other read in this file. */
+            const record = parseInt(fields[1], 10);
+            if (Number.isFinite(record) && (record !== 0) !== recordArmed) {
+                recordArmed = record !== 0;
+                needsRedraw = true;
+            }
+            if (Number.isFinite(rev) && rev !== ccRevision) {
+                if (ccRevision === null) {
+                    /* First poll only adopts the counter; there is nothing
+                     * stale to correct because init() just read everything. */
+                    ccRevision = rev;
+                } else {
+                    const moved = fetchPageValues();
+                    /* Only retire the pending refresh once the read actually
+                     * landed, so a timed-out read is retried next poll instead
+                     * of being silently forgotten. */
+                    if (moved !== null) {
+                        if (moved) needsRedraw = true;
+                        ccRevision = rev;
+                    }
+                }
+            }
         }
         /* The arp pages used to run a whole fetchAll() here — twenty
          * round-trips six times a second, three times what the param channel
