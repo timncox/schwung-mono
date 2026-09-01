@@ -38,6 +38,17 @@ const params = new Map([
     ['track_states', new Array(6).fill(0).join(',')],
     ['status', '0:-1:120:0:0:0:16:0:0:0']
 ]);
+for (let i = 1; i <= 8; i++) { params.set(`p${i}`, '64'); params.set(`alt${i}`, '64'); }
+
+/* The engine's external-CC counter. mono_cc_param bumps it; mono_set_param —
+ * this editor's own knob writes — deliberately does not. It rides along on
+ * rui_play as field 5, a read the runtime poll already makes. */
+let ccRevision = 0;
+const keyReads = new Map();
+function externalCC(slot, value, bank = 'p') {
+    params.set(`${bank}${slot + 1}`, String(value));
+    ccRevision++;
+}
 
 let stateResponses = [];
 let stateCalls = 0;
@@ -139,11 +150,22 @@ const context = vm.createContext({
     move_midi_internal_send() {},
     host_module_get_param(key) {
         roundTrips++;
+        keyReads.set(key, (keyReads.get(key) ?? 0) + 1);
         if (key === 'state') {
             stateCalls++;
             return stateResponses.length ? stateResponses.shift() : undefined;
         }
         if (readFailures > 0) { readFailures--; return null; }
+        /* Served by mono_get_param. Field 5 is the external-CC counter,
+         * appended after the four fields web_ui.html indexes. */
+        if (key === 'rui_play') return `0:-1:120:0:${ccRevision}`;
+        /* Served by mono_get_param: the selected page's primary and Shift-bank
+         * values joined, so a CC refresh costs one read, not sixteen. */
+        if (key === 'page_values') {
+            const bank = (prefix) => Array.from({ length: 8 },
+                (_, i) => params.get(`${prefix}${i + 1}`) ?? '0').join(',');
+            return `${bank('p')}|${bank('alt')}`;
+        }
         return params.get(key) ?? '0';
     },
     /* BULK_GET, transcribed from shim_handle_param_bulk / bulk_next in
@@ -508,6 +530,39 @@ for (let i = 0; i < 60; i++) ui.tick();
 readFailures = 0;
 assert.equal(params.get('track_level'), '96',
     'a timed-out read must leave the DSP alone, not write a default back');
+
+/* ------------------------------------------- external MIDI CC follow-through
+ *
+ * Same bug shape as the one reported on mono-voice: an external CC is applied
+ * inside the DSP, so this editor's values[]/altValues[] mirror goes stale, the
+ * screen keeps showing the old number and the next knob turn sends stale+delta
+ * and undoes the CC. Overtake did eventually catch up on its periodic
+ * fetchAll, but that is up to sixty ticks away — long enough to lose the edit.
+ */
+cc(MoveBack, 127);
+cc(MoveBack, 127);
+readFailures = 0;
+params.set('p1', '64');
+params.set('alt1', '64');
+ui.init();
+for (let i = 0; i < 6; i++) ui.tick();      /* adopt the counter */
+
+externalCC(0, 100);
+for (let i = 0; i < 6; i++) ui.tick();      /* pollRuntime runs every 2nd tick */
+cc(MoveKnob1, 1);
+assert.equal(params.get('p1'), '101',
+    `after a CC set p1=100 the knob wrote ${params.get('p1')}; it must continue ` +
+    'from the CC value, not from the pre-CC mirror');
+
+/* The counter must not advance on this editor's own writes. The engine's
+ * general `revision` does, so watching that instead would make every detent
+ * spend a page read — and a read racing a write reverts the mirror mid-turn. */
+for (let i = 0; i < 6; i++) ui.tick();
+keyReads.set('page_values', 0);
+for (let i = 0; i < 10; i++) { cc(MoveKnob1, 1); ui.tick(); ui.tick(); }
+assert.equal(keyReads.get('page_values'), 0,
+    `ten knob detents caused ${keyReads.get('page_values')} page_values reads — ` +
+    'the editor is following its own writes rather than external CC');
 
 
 /* [file, table, engine count, consequence of drift] */

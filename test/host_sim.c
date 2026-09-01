@@ -1516,6 +1516,87 @@ static void test_cc_control(void) {
     puts("ok: midi cc control");
 }
 
+/* The editors mirror parameters locally because every get_param is a blocking
+ * ~23 ms round-trip. An external CC writes the DSP behind that mirror, so the
+ * engine has to say when it happened — cheaply, and without the editor
+ * mistaking its own writes for someone else's. */
+static void test_cc_revision_and_page_values(void) {
+    mono_t *m = mono_create(&host, 2);
+    assert(m);
+    char buf[128];
+
+    unsigned before = (unsigned)get_int(m, "ui_poll");
+
+    /* An external CC must advance the counter. */
+    uint8_t cc[3] = { 0xB0, 8, 99 };
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    unsigned after_cc = (unsigned)get_int(m, "ui_poll");
+    assert(after_cc > before);
+
+    /* THE POINT: a UI knob write must NOT. mono_set_param bumps the general
+     * `revision`, so if this counter moved too, an editor watching it would
+     * re-read the value it just sent and fight its own knob. */
+    mono_set_param(m, "syn1", "42");
+    mono_set_param(m, "syn2", "43");
+    assert((unsigned)get_int(m, "ui_poll") == after_cc);
+
+    /* An ignored CC (mod wheel) writes nothing, so it must not advance it
+     * either — otherwise a controller idling on CC 1 would keep the editors
+     * re-reading forever. */
+    cc[1] = 1; cc[2] = 64;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_EXTERNAL);
+    assert((unsigned)get_int(m, "ui_poll") == after_cc);
+
+    /* An internal CC is a Move encoder, not a param write. */
+    cc[1] = 8; cc[2] = 7;
+    mono_on_midi(m, cc, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    assert((unsigned)get_int(m, "ui_poll") == after_cc);
+
+    /* ui_poll's second field is the record-arm flag the editors used to spend
+     * a separate read on. */
+    get_string(m, "ui_poll", buf, sizeof(buf));
+    assert(strchr(buf, ':'));
+    assert(atoi(strchr(buf, ':') + 1) == 0);
+    mono_set_param(m, "record", "1");
+    get_string(m, "ui_poll", buf, sizeof(buf));
+    assert(atoi(strchr(buf, ':') + 1) == 1);
+    mono_set_param(m, "record", "0");
+
+    /* page_values is the whole visible page in ONE read: the eight primary
+     * values, '|', the eight Shift-bank values, matching p1..p8 / alt1..alt8
+     * for the selected page. Sixteen separate reads would cost most of a
+     * second and saturate the channel during a controller sweep. */
+    mono_set_param(m, "page", "0");
+    mono_set_param(m, "syn1", "11");
+    mono_set_param(m, "syn8", "18");
+    mono_set_param(m, "syn9", "21");    /* Shift bank slot 1 */
+    mono_set_param(m, "syn16", "28");   /* Shift bank slot 8 */
+    get_string(m, "page_values", buf, sizeof(buf));
+    {
+        const char *bar = strchr(buf, '|');
+        assert(bar);
+        int primary[8], alt[8], n = 0;
+        const char *p = buf;
+        for (n = 0; n < 8; ++n) { primary[n] = atoi(p); p = strchr(p, ',') ? strchr(p, ',') + 1 : bar; }
+        p = bar + 1;
+        for (n = 0; n < 8; ++n) { alt[n] = atoi(p); const char *c = strchr(p, ','); p = c ? c + 1 : p; }
+        assert(primary[0] == 11 && primary[7] == 18);
+        assert(alt[0] == 21 && alt[7] == 28);
+        assert(primary[0] == get_int(m, "p1"));
+        assert(alt[0] == get_int(m, "alt1"));
+    }
+
+    /* It must follow the selected page, exactly as p1..p8 do. */
+    mono_set_param(m, "page", "1");
+    mono_set_param(m, "amp1", "55");
+    get_string(m, "page_values", buf, sizeof(buf));
+    assert(atoi(buf) == 55);
+    assert(atoi(buf) == get_int(m, "p1"));
+
+    mono_destroy(m);
+    puts("ok: cc revision and page_values");
+}
+
 static void test_tie_only_steps_extend_held_notes(void) {
     /* One step at 120 BPM is ~43 blocks. Max gate holds for exactly one
      * step; without a tie the release fires at the boundary. */
@@ -1630,6 +1711,7 @@ int main(void) {
     test_tie_only_steps_extend_held_notes();
     test_calibration_generators_and_metrics();
     test_cc_control();
+    test_cc_revision_and_page_values();
     puts("mono host simulator: all tests passed");
     return 0;
 }

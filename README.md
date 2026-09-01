@@ -161,6 +161,12 @@ traffic can't corrupt a patch. In a chain slot (Mono Voice) set the
 controller to the slot's receive channel — Move's auto channel mapping
 remaps notes, not CCs.
 
+The Move screen follows CC as it arrives: a value you change from the
+controller updates on the display, and the matching Move knob then
+continues from that value instead of jumping back to the one it had
+before. (Up to v0.4.2 the display kept the pre-CC value on Mono Voice's
+sound pages, and turning the knob wrote it back over your CC edit.)
+
 ## Saving and recall
 
 - **Mono Voice sound preset:** in Schwung's Chain Editor, highlight the synth

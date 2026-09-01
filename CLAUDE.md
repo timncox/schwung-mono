@@ -1,6 +1,6 @@
 ---
 status: active
-last_touched: 2026-07-28
+last_touched: 2026-09-01
 ---
 
 # Mono
@@ -99,8 +99,35 @@ are Move's encoders); identical messages within 256 samples drop
 (`cc_last`/`cc_frames` — chain slots can deliver one external CC twice,
 verified in schwung shadow_midi.c 2026-07-24). Writes flow through the
 same base/effective/remember_machine/param-lock path as UI knob edits, so
-CC moves record locks when the sequencer records. The UI polls params and
-reflects DSP-side CC edits on its normal refresh.
+CC moves record locks when the sequencer records.
+
+The editors FOLLOW those writes rather than discovering them by accident.
+A CC is applied inside the DSP, and the Move editors mirror parameters
+locally because every `get_param` is a blocking ~23 ms round-trip — so a CC
+left the mirror stale: the screen kept drawing the old number and the next
+knob turn sent stale+delta and undid the CC. That was true of the chain
+editor's sound pages from v0.4.0, when CC shipped, until the fix that
+followed v0.4.2.
+
+The mechanism is `cc_revision`, a runtime counter bumped ONLY by
+`mono_cc_param`. The engine's general `revision` is useless here because
+`mono_set_param` bumps it too, so an editor watching it would fire on its
+own knob writes and re-read what it just sent. Two get keys carry it at no
+extra channel cost: `ui_poll` → `"<cc_revision>:<record_locks>"` replaces
+the chain editor's old `record` poll, and `rui_play` gained an append-only
+fifth field for the overtake editor (web_ui.html indexes fields 0-3).
+When the counter moves, the editor spends ONE read on `page_values` →
+`"p1,..,p8|alt1,..,alt8"` for the selected page; refreshing those sixteen
+keys individually would cost most of a second and saturate the channel
+during a controller sweep. Measured by the UI harnesses, per 44 ticks:
+chain sound page 11 reads idle, 22 following a continuous CC sweep, and 11
+while turning Move knobs — that last number is the proof it does not chase
+its own writes.
+
+Note there is no route in the other direction: schwung delivers external
+cable-2 MIDI to the DSP, and `onMidiMessageExternal` is an overtake-only
+hook, so a chain UI cannot see external MIDI at all and CC can never be
+fed through the Move-knob handler.
 
 ## Sequencer
 

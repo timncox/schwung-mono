@@ -119,6 +119,10 @@ let shift = false, deleteHeld = false, muteHeld = false, deleteUsed = false, tic
 let shiftVisual = false;
 let values = new Array(8).fill(0), steps = new Array(16).fill(0);
 let altValues = new Array(8).fill(0);
+/* Last external-CC counter seen from the engine; null until the first poll.
+ * ccMoved is set by pollRuntime when that counter advanced, and tick() turns
+ * it into one page_values read. */
+let ccRevision = null, ccMoved = false;
 let heldStep = null, ready = false, needsRedraw = true, resumePaints = 0;
 let focusBank = 0;
 let presetMode = false, presetIndex = 0, presets = [];
@@ -682,7 +686,41 @@ function pollRuntime() {
     const nextPlayStep = parseInt(fields[1], 10);
     playStep = Number.isFinite(nextPlayStep) ? nextPlayStep : -1;
     recordArmed = (parseInt(fields[3], 10) || 0) !== 0;
+    /* Field 5 rides along on a read this poll already makes. It counts ONLY
+     * external-CC parameter writes — the engine's general `revision` also
+     * counts this editor's own knob writes, so watching that would make the
+     * editor chase its own tail. */
+    const rev = parseInt(fields[4], 10);
+    ccMoved = false;
+    if (Number.isFinite(rev) && rev !== ccRevision) {
+        /* The first poll only adopts the counter — fetchAll() ran at init. */
+        if (ccRevision !== null) ccMoved = true;
+        ccRevision = rev;
+    }
     return true;
+}
+
+/* The selected page's sixteen values in ONE round-trip. An external CC writes
+ * the DSP directly, so this editor's values[]/altValues[] mirror goes stale:
+ * the screen keeps the old number and the next knob turn sends stale+delta,
+ * undoing the CC. Reading the mirror back key-by-key would cost sixteen
+ * blocking reads, so the engine serves them joined as "p1,..,p8|alt1,..,alt8". */
+function fetchPageValues() {
+    const raw = gp('page_values');
+    if (raw === null || raw === '') return false;
+    const banks = raw.split('|');
+    if (banks.length < 2) return false;
+    const primary = banks[0].split(','), alt = banks[1].split(',');
+    if (primary.length < 8 || alt.length < 8) return false;
+    let moved = false;
+    for (let i = 0; i < 8; i++) {
+        const pv = parseInt(primary[i], 10), av = parseInt(alt[i], 10);
+        /* A bad field keeps the previous value — never fold a failed read
+         * into a literal, it gets written back on the next knob turn. */
+        if (Number.isFinite(pv) && pv !== values[i]) { values[i] = pv; moved = true; }
+        if (Number.isFinite(av) && av !== altValues[i]) { altValues[i] = av; moved = true; }
+    }
+    return moved;
 }
 
 function octaveLabel() { return `O${keyboardOctave >= 0 ? '+' : ''}${keyboardOctave}`; }
@@ -1048,6 +1086,7 @@ globalThis.init = function() {
 globalThis.onResume = function() {
     shift = false; deleteHeld = false; muteHeld = false;
     ready = fetchAll(); paintAll(true); resumePaints = 3; needsRedraw = true;
+    ccRevision = null;   /* fetchAll just made the mirror current */
 };
 
 /* New hosts use suspend_self_managed and forward Back so Mono can close an
@@ -1076,6 +1115,9 @@ globalThis.tick = function() {
         if (oldTransport !== transport || oldRecord !== recordArmed) {
             paintGlobals(false); needsRedraw = true;
         }
+        /* Follow an external CC now rather than waiting for the periodic
+         * fetchAll below, which is up to sixty ticks away. */
+        if (ccMoved && fetchPageValues()) needsRedraw = true;
         if (tickCount % 30 === 0) {
             const oldScreen = `${machine}:${keyboardOctave}:${values.join(',')}:${altValues.join(',')}`;
             const oldSteps = steps.join(','), oldTracks = trackStates.join(',');
